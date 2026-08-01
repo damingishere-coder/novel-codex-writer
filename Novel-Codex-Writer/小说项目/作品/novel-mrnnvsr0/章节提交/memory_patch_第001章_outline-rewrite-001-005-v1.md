@@ -1,0 +1,20 @@
+# 第001章 memory_patch
+
+> patch_id：`outline-rewrite-001-005-v1`
+
+```json
+{
+  "schema_version": 1,
+  "patch_id": "outline-rewrite-001-005-v1",
+  "chapter": 1,
+  "summary": "第001—005章细纲已按新版第一篇重写，伤亡线统一为30→27→20→20→12。",
+  "ending_state": "正文仍处于第001章开始前，五份开局细纲已可使用，可以生成第001章写作任务书。",
+  "operations": [
+    {
+      "action": "close",
+      "id": "workflow.story-reset",
+      "reason": "用户已明确授权重写第001—005章细纲；五份细纲现已按《第一篇·废铁开局（规则修订版）》完成重写并统一人数、规则、职业与能力推进。"
+    }
+  ]
+}
+```

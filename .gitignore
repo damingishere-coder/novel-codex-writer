@@ -1,0 +1,19 @@
+# Local temporary files
+tmp/
+
+# Secrets and machine-specific environment files
+**/.env
+**/.env.*
+!**/.env.example
+
+# Dependencies, caches, and build output
+**/node_modules/
+**/dist/
+**/__pycache__/
+**/.sessions/
+*.py[cod]
+*.log
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db

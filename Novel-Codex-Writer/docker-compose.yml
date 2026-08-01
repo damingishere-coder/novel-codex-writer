@@ -1,0 +1,27 @@
+name: novel-codex-writer
+
+services:
+  web:
+    image: novel-codex-workbench:local
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        NODE_IMAGE: novel-codex-node:22
+    container_name: novel-codex-workbench
+    working_dir: /app/frontend
+    command: sh -c "if [ ! -x node_modules/.bin/vite ]; then npm ci --no-audit --prefer-offline; fi; npm run dev:docker"
+    ports:
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - .:/app
+      - frontend_node_modules:/app/frontend/node_modules
+    environment:
+      CHOKIDAR_USEPOLLING: "true"
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CODEX_API_KEY: ${CODEX_API_KEY:-}
+      AI_MOCK_MODE: ${AI_MOCK_MODE:-false}
+
+volumes:
+  frontend_node_modules:

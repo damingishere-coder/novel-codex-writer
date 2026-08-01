@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decisions"],
+  "properties": {
+    "decisions": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["findingId", "decision", "reason", "sourcePaths"],
+        "properties": {
+          "findingId": { "type": "string" },
+          "decision": { "type": "string", "enum": ["confirmed", "unsupported", "unverified"] },
+          "reason": { "type": "string" },
+          "sourcePaths": {
+            "type": "array",
+            "maxItems": 4,
+            "items": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}
