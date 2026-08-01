@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "findings"],
+  "properties": {
+    "summary": { "type": "string" },
+    "findings": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "category", "title", "fromLine", "toLine", "before", "after", "evidence", "impact", "fixSuggestion", "verificationNeeded", "lookupTerms"],
+        "properties": {
+          "severity": { "type": "string", "enum": ["S1", "S2", "S3", "S4"] },
+          "category": {
+            "type": "string",
+            "enum": ["chapter_format", "outline", "continuity", "character", "timeline", "world", "foreshadowing", "pacing", "voice", "repetition", "language"]
+          },
+          "title": { "type": "string" },
+          "fromLine": { "type": "integer", "minimum": 1 },
+          "toLine": { "type": "integer", "minimum": 1 },
+          "before": { "type": "string" },
+          "after": { "type": ["string", "null"] },
+          "evidence": { "type": "string" },
+          "impact": { "type": "string" },
+          "fixSuggestion": { "type": "string" },
+          "verificationNeeded": { "type": "boolean" },
+          "lookupTerms": {
+            "type": "array",
+            "maxItems": 4,
+            "items": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

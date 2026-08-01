@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reply", "suggestion"],
+  "properties": {
+    "reply": { "type": "string" },
+    "suggestion": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["decision", "severity", "category", "before", "after", "rationale"],
+          "properties": {
+            "decision": { "type": "string", "enum": ["change", "keep"] },
+            "severity": { "type": "string", "enum": ["S1", "S2", "S3", "S4"] },
+            "category": {
+              "type": "string",
+              "enum": ["outline", "continuity", "character", "timeline", "world", "foreshadowing", "pacing", "voice", "repetition", "language"]
+            },
+            "before": { "type": "string" },
+            "after": { "type": "string" },
+            "rationale": { "type": "string" }
+          }
+        }
+      ]
+    }
+  }
+}

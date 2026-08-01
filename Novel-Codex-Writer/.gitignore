@@ -1,0 +1,19 @@
+# Python generated caches
+**/__pycache__/
+*.py[cod]
+
+# Recoverable and short-lived workflow state
+小说项目/.trash/
+**/记忆库/.transactions/
+
+# Rebuildable or per-chapter generated projections
+**/记忆库/index/memory_index.json
+**/记忆库/current/本章写作任务书.md
+
+# 本地密钥与环境配置（示例文件除外）
+.env
+.env.*
+!.env.example
+
+# 仅限本机的网页设置
+frontend/.local/
