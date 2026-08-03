@@ -1,175 +1,185 @@
-# Novel-Codex-Writer
+<div align="center">
 
-这是一个用于多部长篇小说创作的 Codex + DeepSeek 工作流项目。它的目标不是开发复杂软件，而是帮助你像使用小说工作台一样，长期、稳定、可追踪地管理多本小说。
+# Novel Codex Writer
 
-当前版本已经改成“作品库”模式：同一个网页端可以创建、切换、编辑和删除多本小说。
+**面向长篇网络小说创作的本地 AI 工作台**
 
-## 本地网页工作台
+用结构化大纲、章节审查、长期记忆与 Codex Agent 工作流，持续管理和创作多部长篇小说。
 
-如果你想用网页管理小说资料，在本目录双击：
+[中文](README.md) · [English](README.en.md) · [快速开始](docs/quick-start.md) · [工作流](docs/writing-workflow.md) · [路线图](ROADMAP.md)
 
-- `启动网页.bat`：用 Docker 启动网页，并自动打开 `http://localhost:5173/`
-- `关闭网页.bat`：关闭网页服务
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Platform](https://img.shields.io/badge/platform-Windows-0078D4.svg)
+![Docker](https://img.shields.io/badge/runtime-Docker-2496ED.svg)
+![Codex Skill](https://img.shields.io/badge/agent-Codex%20Skill-111111.svg)
+![Local First](https://img.shields.io/badge/data-local--first-2EA44F.svg)
 
-启动后，Docker Desktop 的 Containers 页面会出现 `novel-codex-workbench`。
+</div>
 
-第一次启动需要 Docker Desktop 完成初始化，可能会等几分钟。
+> 这个项目不是“输入一句话，自动吐出整本小说”的生成器。它更像一个 AI 小说创作操作系统：让作者保留最终控制权，同时让 Agent 按固定流程整理大纲、准备上下文、创作章节、检查问题并维护长期记忆。
 
-## AI 审校（可选）
+## 为什么需要它
 
-工作台现在提供带行号的“审校”模式：点击行号可以批注单行，按住 `Shift` 再点击另一个行号可以选择连续多行。右侧可使用 DeepSeek V4 快速审校，或使用 Codex 深度审校。每条结果都会分别显示原文、建议改为和修改说明；“采用”只改当前草稿，必须再点击顶部“保存”才会写入正文。
+长篇 AI 写作真正困难的并不是生成一章文字，而是长期保持一致：
 
-第一次配置 DeepSeek 时不需要打开终端：
+- 写到几十章后，AI 容易忘记人物状态、关系和伏笔。
+- 大纲、正文、设定和修改记录分散，难以持续管理。
+- 每次都把全部历史塞入上下文，成本高且容易产生冲突。
+- 章节虽然“能读”，却可能流水账、缺少推进，或带有明显 AI 腔。
+- 多本小说并行时，资料容易串书或相互污染。
 
-1. 打开网页左下角的“AI 设置”。
-2. 在 DeepSeek API 密钥输入框中粘贴密钥，并选择 V4-Flash 或 V4-Pro。
-3. 点击“保存设置”。也可以继续使用项目根目录的 `配置AI密钥.bat` 作为备用方式。
+Novel Codex Writer 通过 **Markdown 事实源 + 当前状态投影 + 可重建索引 + 章节工作流**，让 Agent 只读取当下真正需要的资料。
 
-真实密钥只保存在本机 `.env` 文件中。该文件已经被 Git 忽略，网页 API 只返回“已配置/未配置”，不会返回密钥内容。Codex 不需要单独的 API 密钥；启动脚本会把本机 Codex App / CLI 已缓存的 ChatGPT 登录安全复制到 Docker 容器中供 Codex CLI 使用。没有配置 AI 时，普通阅读、编辑、保存和批注功能仍可正常使用。
+## 核心能力
 
-## 作品库结构
+| 能力 | 说明 |
+| --- | --- |
+| 多作品管理 | 在同一个本地工作台创建、切换、重命名和管理多本小说 |
+| 长篇记忆 | 分离当前状态、历史档案、索引与阶段摘要，减少遗忘和冲突 |
+| 章节工作流 | 按“细纲 → 上下文 → 正文 → 审查 → 记忆更新”完成每一章 |
+| Codex Skill | 让 Codex 按明确规则选择资料、运行脚本并维护作品状态 |
+| AI 审校 | 支持 DeepSeek 快速审校和 Codex 深度审校，修改由作者确认 |
+| 本地优先 | 小说正文、设定和密钥保存在本机，不依赖云端项目数据库 |
 
-- `小说项目/projects.json`：记录所有小说和当前选中的小说。
-- `小说项目/作品/`：每本小说一个独立目录。
-- `小说项目/.trash/`：网页端删除的小说或 Markdown 文件会先移动到这里。
-- `小说项目/templates/`：通用骨架说明，不包含任何具体小说设定。
+## 它如何工作
 
-每一本小说内部都会使用同一套结构：
+```mermaid
+flowchart LR
+    A[作品与大纲] --> B[章节细纲]
+    B --> C[生成写作任务书]
+    C --> D[读取前置正文与当前状态]
+    D --> E[Codex 创作正文]
+    E --> F[章节检查与 AI 审校]
+    F --> G[作者确认并保存]
+    G --> H[章节提交与 memory patch]
+    H --> I[更新 current / 索引 / 档案]
+    I --> B
+```
 
-- `大纲/`：放原始大纲、总纲、卷纲、章节规划。
-- `写作规范/`：放文风、反流水账检查、不同章节类型的写法参考。
-- `正文/`：保存正式章节正文。
-- `章节提交/`：保存每章写完后的提交记录，方便回顾这一章改了什么。
-- `审查报告/`：保存章节审查结果，比如节奏、冲突、设定一致性问题。
-- `记忆库/current/`：当前投影，只保存写下一章最需要知道的当前状态。
-- `记忆库/index/`：章节、角色、伏笔、地点、设定的索引。
-- `记忆库/snapshots/`：每 5 章左右生成一次阶段摘要。
-- `档案库/`：保存完整历史档案，比如角色历史、伏笔历史、地点历史、设定历史、事实历史。
+这套流程的重点不是让 AI 自由发挥到失控，而是把创作拆成可检查、可回退、可追踪的步骤。
 
-## 第一步：创建一本新小说
+## 快速开始
 
-打开网页后，如果作品库是空的，会看到“新建小说”入口。
+### 环境要求
 
-输入小说名称后，网页会自动创建：
+- Windows 10 / 11
+- Docker Desktop
+- 可选：Codex App 或 Codex CLI，用于 Agent 深度写作与审校
+- 可选：DeepSeek API Key，用于网页中的快速审校
 
-`小说项目/作品/<项目ID>/`
+### 1. 获取项目
 
-你不需要自己理解项目 ID，它只是系统给这本小说生成的安全目录名。
+克隆仓库，或在 GitHub 页面点击 **Code → Download ZIP**：
 
-## 第二步：放入或新建大纲
+```powershell
+git clone https://github.com/damingishere-coder/webnovel-writer-Skill.git
+cd webnovel-writer-Skill
+```
 
-在网页里新建一个 Markdown 文档，例如：
+### 2. 启动本地工作台
 
-`大纲/原始大纲.md`
+在项目目录双击：
 
-然后把你的新大纲粘贴进去并保存。这个文件可以很粗糙，不需要一开始就整理得很漂亮。
+- `启动网页.bat`：启动 Docker 服务并打开 `http://localhost:5173/`
+- `关闭网页.bat`：停止本地服务
 
-## 第三步：让 Codex 整理大纲
+第一次启动需要 Docker Desktop 拉取和构建依赖，完成后浏览器会进入作品库。
 
-对 Codex 说：
+### 3. 创建第一本小说
+
+1. 在作品库中新建小说。
+2. 创建 `大纲/原始大纲.md`。
+3. 粘贴你的故事构想、人物、世界观或粗略剧情。
+4. 保存文档。
+
+### 4. 让 Codex 初始化作品
+
+在 Codex 中打开本仓库，然后输入：
 
 ```text
 请使用 webnovel-writer Skill，读取当前小说的大纲/原始大纲.md。
-先不要写正文，请帮我整理出 总纲.md、第一卷.md、章节规划.md，并初始化 current 投影和索引。
+先不要写正文，请整理总纲、篇纲和章节规划，并初始化 current 投影与索引。
 ```
 
-Codex 应该先读取 `小说项目/projects.json`，确认当前选中的是哪一本小说，然后只在这本小说目录里操作。
-
-## 第四步：开始写第 1 章
-
-对 Codex 说：
+开始写第一章时输入：
 
 ```text
 请使用 webnovel-writer Skill，开始写第 1 章。
-先生成本章上下文包，再写正文；写完后审查、修改、保存正文，并生成章节 commit 和 memory_patch。
+先确认本章细纲并生成写作任务书，再写正文；完成审查和修改后保存正文，并生成章节提交与 memory patch。
 ```
 
-写第 1 章时，Codex 不应该读取全部历史，因为此时还没有章节历史。它应该主要读取当前小说的大纲、写作规范和 current 投影。
+更完整的安装、AI 配置和首次运行说明见 [快速开始](docs/quick-start.md)。
 
-从现在起，每章写正文前都会先确认或生成本章细纲：
+## 面向谁
 
-`大纲/细纲_第001章.md`
+### 小说作者
 
-细纲会记录本章目标、情节点、密/疏节奏、字数预算、必须承接、压力选择、可用伏笔和结尾钩子。如果细纲不存在，辅助脚本会停止并提示先补齐细纲；确认细纲后再生成 `记忆库/current/本章写作任务书.md`。
+通过网页管理大纲、正文、人物、伏笔和审查结果，不需要手动理解全部脚本。
 
-## 第五步：连续写后续章节
+### Codex / Agent 用户
 
-对 Codex 说：
+通过 `.agents/skills/webnovel-writer/` 中的 Skill 规则和脚本，按需读取资料并执行稳定的章节流程。
+
+### 开发者与贡献者
+
+可以扩展网页工作台、记忆机制、章节检查器、模型适配器和导出能力。开始前请阅读 [贡献指南](CONTRIBUTING.md)。
+
+## 作品数据结构
+
+每本小说拥有独立目录，避免跨作品读取：
 
 ```text
-请使用 webnovel-writer Skill，继续写第 2 章。
-按项目规则读取前面最多 5 章的最新正文全文，生成本章写作任务书，写完后更新 current。
+小说项目/作品/<项目ID>/
+├── 大纲/          # 原始大纲、总纲、篇纲、章节规划与章节细纲
+├── 写作规范/      # 文风、审查和章节写法规则
+├── 正文/          # 最终确认的章节正文
+├── 章节提交/      # 每章发生了什么、改变了什么
+├── 审查报告/      # S1-S4 章节检查与修改建议
+├── 记忆库/
+│   ├── current/   # 下一章仍可能生效的当前状态
+│   ├── index/     # 可删除、可重建的检索索引
+│   └── snapshots/ # 篇章阶段摘要
+└── 档案库/        # 角色、伏笔、地点、设定与事实的完整历史
 ```
 
-Codex 每次写章都要遵守这个顺序：
+详细说明见 [项目结构](docs/project-structure.md) 和 [写作工作流](docs/writing-workflow.md)。
 
-1. 确认当前小说。
-2. 读取写作规范。
-3. 确认或生成本章细纲。
-4. 选择本章需要的上下文和连续前五章正文。
-5. 生成本章写作任务书，并全文读取任务书列出的前置正文。
-6. 写正文。
-7. 审查正文。
-8. 修改正文。
-9. 保存正文。
-10. 运行章节检查。
-11. 生成章节 commit。
-12. 生成 memory_patch。
-13. 更新 current 投影。
+## AI 与隐私
 
-章节检查使用 S1-S4 严重度：S1 是硬性失败，S2 是必须修改，S3 是建议修改，S4 是轻微润色。去 AI 味先只生成报告，不自动大段改写正文。
+- 未配置任何 AI 服务时，阅读、编辑、保存和批注仍可使用。
+- DeepSeek 密钥仅保存在本机 `.env`，网页 API 不返回真实密钥。
+- Codex 使用本机已有的登录状态，不需要把账号凭据写入仓库。
+- `.env`、会话缓存、日志和构建产物已被 Git 忽略。
+- 请勿把真实密钥、私密正文或登录缓存提交到公共仓库。
 
-## 辅助脚本
+安全问题与密钥泄漏处理方式见 [SECURITY.md](SECURITY.md)。
 
-这些脚本主要给 Codex 使用。你平时不需要自己运行；如果需要手动运行，请在项目根目录执行，也就是包含 `README.md` 和 `小说项目/` 的这个目录。
+## 当前状态与限制
 
-生成第 1 章写作任务书：
+当前版本面向本地个人创作，仍处于持续迭代阶段：
 
-```powershell
-python .agents\skills\webnovel-writer\scripts\build_context.py --chapter 1
-```
+- 主要启动流程针对 Windows + Docker Desktop。
+- Codex 和 DeepSeek 均为可选能力，实际输出质量取决于模型与作者提供的资料。
+- 章节检查能发现确定性问题和常见写作问题，但不能替代作者判断。
+- 项目强调人工确认，不以无人值守批量生成整本小说为目标。
 
-作用：读取当前选中的小说，确认 `大纲/细纲_第001章.md` 已存在，再生成 `记忆库/current/本章写作任务书.md`。生成后续章节任务书时，会列出必须全文读取的连续前五章正文。
+计划中的能力见 [ROADMAP.md](ROADMAP.md)，版本变化见 [CHANGELOG.md](CHANGELOG.md)。
 
-检查第 1 章正文：
+## 文档
 
-```powershell
-python .agents\skills\webnovel-writer\scripts\check_chapter.py --chapter 1
-```
+- [快速开始](docs/quick-start.md)
+- [完整写作工作流](docs/writing-workflow.md)
+- [项目目录与数据说明](docs/project-structure.md)
+- [常见问题与排错](docs/troubleshooting.md)
+- [贡献指南](CONTRIBUTING.md)
+- [安全说明](SECURITY.md)
 
-作用：检查正文是否在 2000-2500 字之间，章节号是否匹配，是否泄漏“本章、细纲、读者、伏笔”等写作工程词，以及是否有明显 AI 腔、重复段落和标点问题。
+## 参与贡献
 
-## 第六步：每 5 章做一次压缩摘要
+欢迎提交 Bug、文档改进、工作流建议和代码贡献。为了避免破坏小说数据与记忆兼容性，请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-写完第 5 章、第 10 章、第 15 章时，对 Codex 说：
+## License
 
-```text
-请使用 webnovel-writer Skill，对当前小说最近 5 章进行阶段压缩摘要。
-不要删除正文，把阶段摘要保存到 snapshots，并根据需要压缩 current 投影、更新索引和档案库。
-```
+本项目采用 [MIT License](LICENSE)。
 
-压缩摘要的目的不是丢掉历史，而是让写后续章节时不用反复读取太多旧正文。
-
-## 只读和编辑 API
-
-网页端通过本地 API 管理资料：
-
-- `GET /api/projects`：读取作品库清单。
-- `POST /api/projects`：创建新小说。
-- `PATCH /api/projects/:id`：重命名小说或切换当前小说。
-- `DELETE /api/projects/:id`：把小说移入 `.trash/`。
-- `GET /api/library?projectId=...`：扫描当前小说的 Markdown 文件。
-- `GET /api/document?projectId=...&path=...`：读取单个 Markdown 文件。
-- `PUT /api/document?projectId=...&path=...`：保存 Markdown 文件。
-- `DELETE /api/document?projectId=...&path=...`：把 Markdown 文件移入 `.trash/`。
-- `GET /api/search?projectId=...&q=...`：搜索当前小说标题、路径和正文内容。
-
-API 会限制读写范围，不能访问当前小说目录之外的文件。
-
-## 注意
-
-- 不要让 Codex 默认读取全部正文。
-- 不要跨小说读取资料。
-- 不要把 `current` 当成流水账无限追加。
-- 不要跳过章节 commit 和 memory_patch。
-- 不要在你还没确认大纲前开始写正文。
+如果这个项目对你的长篇创作有帮助，欢迎点一个 Star，让更多作者发现它。
