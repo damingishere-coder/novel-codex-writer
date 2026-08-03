@@ -2,8 +2,15 @@
 **/__pycache__/
 *.py[cod]
 
+# User-created novel library data
+# Keep personal manuscripts, project indexes, and deleted files out of Git.
+小说项目/projects.json
+小说项目/作品/*
+!小说项目/作品/.gitkeep
+小说项目/.trash/*
+!小说项目/.trash/.gitkeep
+
 # Recoverable and short-lived workflow state
-小说项目/.trash/
 **/记忆库/.transactions/
 
 # Rebuildable or per-chapter generated projections
