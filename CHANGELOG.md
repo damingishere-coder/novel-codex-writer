@@ -2,26 +2,11 @@
 
 本项目的重要变化记录在这里。
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号计划遵循语义化版本。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
 ## Unreleased
 
-### Added
-
-- 新增英文项目主页 `README.en.md`。
-- 新增快速开始、写作工作流、项目结构和排错文档。
-- 新增贡献指南、安全说明、路线图与 GitHub Issue / PR 模板。
-- 新增 MIT License。
-- 新增三张产品预览占位图。
-- 新增完全虚构的《雾港来信》脱敏 Demo，覆盖大纲、正文、审查、章节提交、memory patch 和 current 投影。
-- 新增 GitHub Actions CI、仓库安全测试、Demo schema 测试和章节检查器烟雾测试。
-
-### Changed
-
-- 重构中文 README，使首页从内部开发说明转为面向作者、Agent 用户和贡献者的产品入口。
-- 将章节流程、记忆机制和目录说明拆分到 `docs/`，降低首页阅读负担。
-- 仓库名称统一为 `novel-codex-writer`，并更新中英文文档中的克隆地址。
-- `小说项目/projects.json`、用户作品目录和回收站默认被 Git 忽略，降低私密正文误提交风险。
+当前没有已登记但尚未发布的变化。
 
 ## 0.1.0 - 2026-08-03
 
@@ -33,6 +18,31 @@
 - 章节细纲、写作任务书、章节检查、章节提交和 memory patch 工作流。
 - `current` 当前状态投影、可重建索引、历史档案和篇章摘要机制。
 - DeepSeek 快速审校与 Codex 深度审校入口。
-- 本地 `.env` 密钥保存和受限文件访问。
+- 中英文项目主页、快速开始、写作工作流、项目结构和排错文档。
+- MIT License、贡献指南、安全说明、路线图与 GitHub Issue / PR 模板。
+- 三张产品预览占位图。
+- 完全虚构的《雾港来信》脱敏 Demo，覆盖大纲、正文、审查、章节提交、memory patch 和 current 投影。
+- GitHub Actions CI、仓库安全测试、Demo schema 测试、章节检查器烟雾测试和记忆系统功能测试。
+- `docs/releases/v0.1.0.md` 正式发布说明。
 
-> 正式创建 GitHub Release 和版本标签后，再补充对应比较链接。
+### Changed
+
+- 重构中文 README，使首页从内部开发说明转为面向作者、Agent 用户和贡献者的产品入口。
+- 将章节流程、记忆机制和目录说明拆分到 `docs/`，降低首页阅读负担。
+- 仓库名称统一为 `novel-codex-writer`，并更新中英文文档中的克隆地址。
+- `小说项目/projects.json`、用户作品目录和回收站默认被 Git 忽略，降低私密正文误提交风险。
+- CI 使用只读仓库权限，并在每个 PR 与 `main` 推送上自动运行。
+
+### Fixed
+
+- 限制 `activeProjectId` 只能解析到 `小说项目/作品/` 内，阻止通过 `../` 跳出作品目录。
+- 为 memory patch 重复 ID、非法状态、索引重建、索引恢复和幂等执行增加回归测试。
+- 同一 `patch_id` 对应不同内容时必须失败，避免静默覆盖历史记忆。
+
+### Security
+
+- 默认忽略 `.env`、会话缓存、日志、构建产物和用户真实小说数据。
+- 增加自动化检查，阻止密钥样式文件和个人作品进入公共仓库。
+- 增加活动作品路径逃逸测试。
+
+> 创建 GitHub 标签和 Release 后，将 `docs/releases/v0.1.0.md` 作为 Release 正文。
