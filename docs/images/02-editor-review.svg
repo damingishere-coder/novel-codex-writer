@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+<rect width="1600" height="900" fill="#F6F7FB"/>
+<style>
+.t{font-family:Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif;fill:#1F2430}
+.m{font-family:Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif;fill:#7B8190}
+.w{font-family:Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif;fill:#FFFFFF}
+</style>
+<rect x="0" y="0" width="250" height="900" fill="#171A24"/>
+<text x="34" y="66" font-size="28" class="w">Novel Codex</text>
+<text x="34" y="103" font-size="28" class="w">Writer</text>
+<text x="50" y="169" font-size="22" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif" fill="#B9BECA">作品库</text>
+<text x="50" y="242" font-size="22" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif" fill="#B9BECA">文档</text>
+<rect x="22" y="279" width="206" height="54" rx="12" fill="#2B3041"/>
+<rect x="22" y="279" width="5" height="54" fill="#8B7CF6"/>
+<text x="50" y="315" font-size="22" class="w">章节审校</text>
+<text x="50" y="388" font-size="22" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif" fill="#B9BECA">记忆库</text>
+<text x="50" y="461" font-size="22" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif" fill="#B9BECA">搜索</text>
+<rect x="22" y="800" width="206" height="54" rx="14" fill="#252A38"/>
+<text x="48" y="834" font-size="20" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif" fill="#DCE0EA">AI 设置</text>
+<text x="290" y="70" font-size="30" class="t">第 042 章 · 雨夜入城</text>
+<text x="290" y="100" font-size="18" class="m">《山海问道》</text>
+<rect x="1180" y="34" width="142" height="42" rx="21" fill="#EEF0F4"/>
+<text x="1251" y="62" font-size="17" text-anchor="middle" class="t">保存草稿</text>
+<rect x="1340" y="34" width="205" height="42" rx="21" fill="#6C5CE7"/>
+<text x="1442" y="62" font-size="17" text-anchor="middle" class="w">Codex 深度审校</text>
+<rect x="280" y="115" width="240" height="735" rx="18" fill="#FFFFFF" stroke="#E7E9F0"/>
+<text x="310" y="165" font-size="22" class="t">文档</text>
+<text x="312" y="215" font-size="18" class="t">大纲</text>
+<text x="320" y="263" font-size="17" class="m">总纲.md</text>
+<text x="320" y="311" font-size="17" class="m">第02篇_雨城.md</text>
+<text x="320" y="359" font-size="17" class="m">细纲_第042章.md</text>
+<text x="312" y="407" font-size="18" class="t">正文</text>
+<text x="320" y="455" font-size="17" class="m">第040章.md</text>
+<text x="320" y="503" font-size="17" class="m">第041章.md</text>
+<rect x="298" y="523" width="202" height="40" rx="10" fill="#EEF0FF"/>
+<text x="320" y="550" font-size="17" fill="#6C5CE7" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">第042章_雨夜入城.md</text>
+<text x="312" y="602" font-size="18" class="t">审查报告</text>
+<text x="312" y="650" font-size="18" class="t">记忆库 / current</text>
+<rect x="540" y="115" width="570" height="735" rx="18" fill="#FFFFFF" stroke="#E7E9F0"/>
+<text x="570" y="165" font-size="22" class="t">正文编辑器</text>
+<text x="1045" y="165" font-size="16" text-anchor="end" class="m">2,284 字</text>
+<line x1="570" y1="185" x2="1080" y2="185" stroke="#E7E9F0"/>
+<text x="575" y="235" font-size="16" fill="#A5A9B5" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">01</text><text x="625" y="235" font-size="21" class="t">雨从城楼的飞檐上倾下来，像一层压低的银幕。</text><text x="575" y="295" font-size="16" fill="#A5A9B5" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">02</text><text x="625" y="295" font-size="21" class="t">林序收起斗笠，抬头看向城门上那盏摇晃的红灯。</text><text x="575" y="355" font-size="16" fill="#A5A9B5" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">03</text><text x="625" y="355" font-size="21" class="t">守门人没有问路引，只盯着他腰间那柄旧刀。</text><text x="575" y="415" font-size="16" fill="#A5A9B5" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">04</text><text x="625" y="415" font-size="21" class="t">“外乡人？”</text><text x="575" y="475" font-size="16" fill="#A5A9B5" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">05</text><text x="625" y="475" font-size="21" class="t">林序笑了笑：“今晚之后，也许就不是了。”</text><text x="575" y="535" font-size="16" fill="#A5A9B5" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">06</text><text x="625" y="535" font-size="21" class="t">远处忽然传来三声急钟。街上的灯火同时暗了半截。</text>
+<rect x="1130" y="115" width="440" height="735" rx="18" fill="#FFFFFF" stroke="#E7E9F0"/>
+<text x="1160" y="165" font-size="22" class="t">审校结果</text>
+<rect x="1410" y="138" width="125" height="36" rx="18" fill="#FFF4E5"/>
+<text x="1472" y="162" font-size="16" text-anchor="middle" fill="#F59E0B" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">3 条建议</text>
+<rect x="1155" y="205" width="390" height="160" rx="16" fill="#FAFAFC" stroke="#E7E9F0"/>
+<rect x="1175" y="223" width="60" height="30" rx="15" fill="#FFFFFF"/>
+<text x="1205" y="244" font-size="15" text-anchor="middle" fill="#F59E0B" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">S2</text>
+<text x="1250" y="247" font-size="18" class="t">人物动机承接不足</text>
+<text x="1175" y="291" font-size="16" class="m">进城决定缺少与上一章线索的明确连接。</text>
+<rect x="1390" y="317" width="132" height="33" rx="16" fill="#EEF0FF"/>
+<text x="1456" y="340" font-size="15" text-anchor="middle" fill="#6C5CE7" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">采用建议</text>
+<rect x="1155" y="383" width="390" height="160" rx="16" fill="#FAFAFC" stroke="#E7E9F0"/>
+<rect x="1175" y="401" width="60" height="30" rx="15" fill="#FFFFFF"/>
+<text x="1205" y="422" font-size="15" text-anchor="middle" fill="#3B82F6" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">S3</text>
+<text x="1250" y="425" font-size="18" class="t">对话略显模板化</text>
+<text x="1175" y="469" font-size="16" class="m">人物个人口吻还不够鲜明。</text>
+<rect x="1390" y="495" width="132" height="33" rx="16" fill="#EEF0FF"/>
+<text x="1456" y="518" font-size="15" text-anchor="middle" fill="#6C5CE7" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">采用建议</text>
+<rect x="1155" y="561" width="390" height="160" rx="16" fill="#FAFAFC" stroke="#E7E9F0"/>
+<rect x="1175" y="579" width="60" height="30" rx="15" fill="#FFFFFF"/>
+<text x="1205" y="600" font-size="15" text-anchor="middle" fill="#7B8190" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">S4</text>
+<text x="1250" y="603" font-size="18" class="t">局部节奏可压缩</text>
+<text x="1175" y="647" font-size="16" class="m">开头环境描写可以合并。</text>
+<rect x="1390" y="673" width="132" height="33" rx="16" fill="#EEF0FF"/>
+<text x="1456" y="696" font-size="15" text-anchor="middle" fill="#6C5CE7" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">采用建议</text>
+<rect x="1160" y="802" width="202" height="36" rx="18" fill="#E9F8F2"/>
+<text x="1261" y="826" font-size="16" text-anchor="middle" fill="#23A36D" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">DeepSeek 快速审校</text>
+<rect x="1376" y="802" width="169" height="36" rx="18" fill="#EEF0F4"/>
+<text x="1460" y="826" font-size="16" text-anchor="middle" class="t">重新审校</text>
+<text x="1545" y="882" font-size="14" text-anchor="end" class="m">概念占位图 · 后续请替换为真实截图</text></svg>
