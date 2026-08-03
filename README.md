@@ -41,6 +41,22 @@ Novel Codex Writer 通过 **Markdown 事实源 + 当前状态投影 + 可重建�
 | AI 审校 | 支持 DeepSeek 快速审校和 Codex 深度审校，修改由作者确认 |
 | 本地优先 | 小说正文、设定和密钥保存在本机，不依赖云端项目数据库 |
 
+## 产品预览
+
+> 以下为根据当前功能和数据结构制作的概念占位图，并非真实运行截图。后续可以直接用相同文件名替换为实际截图，README 无需再次修改。
+
+### 多作品管理
+
+![作品库概念图](docs/images/01-library-dashboard.svg)
+
+### 正文编辑与 AI 审校
+
+![正文编辑与审校概念图](docs/images/02-editor-review.svg)
+
+### 长期记忆与当前状态
+
+![长期记忆概念图](docs/images/03-memory-dashboard.svg)
+
 ## 它如何工作
 
 ```mermaid
