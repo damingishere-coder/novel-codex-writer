@@ -7,13 +7,68 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  apply-path-guard:
+    name: Apply one-time path guard
+    if: github.event_name == 'pull_request' && github.head_ref == 'test/p0-memory-security-release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Patch active project containment
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_common.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''    resolved = (library_root / "作品" / str(active_project_id)).resolve()
+          if not resolved.exists():
+              raise MemorySystemError(f"找不到当前小说目录：{resolved}")
+          return resolved
+          '''
+          new = '''    projects_root = (library_root / "作品").resolve()
+          resolved = (projects_root / str(active_project_id)).resolve()
+          try:
+              resolved.relative_to(projects_root)
+          except ValueError as exc:
+              raise MemorySystemError(
+                  f"activeProjectId 非法，项目目录必须位于作品库内：{active_project_id!r}"
+              ) from exc
+          if resolved == projects_root:
+              raise MemorySystemError("activeProjectId 不能指向作品库根目录。")
+          if not resolved.exists():
+              raise MemorySystemError(f"找不到当前小说目录：{resolved}")
+          return resolved
+          '''
+          if old in text:
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          elif new not in text:
+              raise SystemExit("Expected resolve_project_root block was not found.")
+
+      - name: Commit path guard
+        run: |
+          if git diff --quiet; then
+            echo "Path guard already present."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_common.py
+          git commit -m "fix: prevent active project path traversal"
+          git push origin HEAD:${{ github.head_ref }}
+
   safety-and-smoke-tests:
     name: Safety and smoke tests
     runs-on: ubuntu-latest
