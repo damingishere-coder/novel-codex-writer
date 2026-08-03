@@ -6,6 +6,14 @@ tmp/
 **/.env.*
 !**/.env.example
 
+# User-created novel library data
+# Keep personal manuscripts, project indexes, and deleted files out of the public repository.
+小说项目/projects.json
+小说项目/作品/*
+!小说项目/作品/.gitkeep
+小说项目/.trash/*
+!小说项目/.trash/.gitkeep
+
 # Dependencies, caches, and build output
 **/node_modules/
 **/dist/

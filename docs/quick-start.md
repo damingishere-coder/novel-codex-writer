@@ -20,16 +20,22 @@
 ### 使用 Git
 
 ```powershell
-git clone https://github.com/damingishere-coder/webnovel-writer-Skill.git
-cd webnovel-writer-Skill
+git clone https://github.com/damingishere-coder/novel-codex-writer.git
+cd novel-codex-writer
 ```
 
 ### 使用 ZIP
 
 1. 打开 GitHub 仓库主页。
 2. 点击 **Code → Download ZIP**。
-3. 解压到一个路径较短、具有读写权限的目录。
+3. 解压到路径较短、具有读写权限的目录。
 4. 不建议放在系统受保护目录中。
+
+### 先浏览脱敏 Demo
+
+仓库中的 [`examples/demo-novel/`](../examples/demo-novel/) 是一套完全虚构的示例，展示原始大纲、章节细纲、缩短版正文、审查报告、章节提交、memory patch 和 `current` 状态如何对应。
+
+Demo 不会自动写入你的作品库。真实作品应保存在本机 `小说项目/作品/`，该目录、`小说项目/projects.json` 和 `.trash/` 默认被 Git 忽略。
 
 ## 3. 启动网页工作台
 
@@ -73,7 +79,7 @@ http://localhost:5173/
 开局发生什么，中期如何升级，最终冲突是什么。
 ```
 
-原始大纲不要求一次写完整。它只是后续整理的输入。
+原始大纲不要求一次写完整，它只是后续整理的输入。
 
 ## 5. 使用 Codex 初始化作品
 
@@ -90,7 +96,7 @@ Codex 应先读取：
 小说项目/projects.json
 ```
 
-确认当前活动小说，只能在对应的作品目录内操作。
+确认当前活动小说，只能在对应作品目录内操作。
 
 ## 6. 开始第 1 章
 
@@ -149,6 +155,7 @@ Codex 不需要在项目中单独保存 API Key。启动流程会尝试使用本
 
 ## 10. 下一步
 
+- 浏览 [脱敏 Demo](../examples/demo-novel/)。
 - 阅读 [完整写作工作流](writing-workflow.md)。
 - 了解 [项目目录与数据说明](project-structure.md)。
 - 遇到问题查看 [常见问题与排错](troubleshooting.md)。
