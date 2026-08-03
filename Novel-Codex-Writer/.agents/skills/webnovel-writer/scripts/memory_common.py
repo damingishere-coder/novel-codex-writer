@@ -129,7 +129,16 @@ def resolve_project_root(library_root: Path, project_root: str | Path | None) ->
     active_project_id = index.get("activeProjectId")
     if not active_project_id:
         raise MemorySystemError("当前没有选中的小说。请先在网页端新建或选择小说。")
-    resolved = (library_root / "作品" / str(active_project_id)).resolve()
+    projects_root = (library_root / "作品").resolve()
+    resolved = (projects_root / str(active_project_id)).resolve()
+    try:
+        resolved.relative_to(projects_root)
+    except ValueError as exc:
+        raise MemorySystemError(
+            f"activeProjectId 非法，项目目录必须位于作品库内：{active_project_id!r}"
+        ) from exc
+    if resolved == projects_root:
+        raise MemorySystemError("activeProjectId 不能指向作品库根目录。")
     if not resolved.exists():
         raise MemorySystemError(f"找不到当前小说目录：{resolved}")
     return resolved
