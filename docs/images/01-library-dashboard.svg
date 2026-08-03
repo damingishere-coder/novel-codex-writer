@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+<rect width="1600" height="900" fill="#F6F7FB"/>
+<style>
+.t{font-family:Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif;fill:#1F2430}
+.m{font-family:Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif;fill:#7B8190}
+.w{font-family:Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif;fill:#FFFFFF}
+</style>
+<rect x="0" y="0" width="250" height="900" fill="#171A24"/>
+<text x="34" y="66" font-size="28" class="w">Novel Codex</text>
+<text x="34" y="103" font-size="28" class="w">Writer</text>
+<rect x="22" y="133" width="206" height="54" rx="12" fill="#2B3041"/>
+<rect x="22" y="133" width="5" height="54" fill="#8B7CF6"/>
+<text x="50" y="169" font-size="22" class="w">作品库</text>
+<text x="50" y="242" font-size="22" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif" fill="#B9BECA">文档</text>
+<text x="50" y="315" font-size="22" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif" fill="#B9BECA">章节审校</text>
+<text x="50" y="388" font-size="22" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif" fill="#B9BECA">记忆库</text>
+<text x="50" y="461" font-size="22" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif" fill="#B9BECA">搜索</text>
+<rect x="22" y="800" width="206" height="54" rx="14" fill="#252A38"/>
+<text x="48" y="834" font-size="20" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif" fill="#DCE0EA">AI 设置</text>
+<text x="300" y="84" font-size="38" class="t">作品库</text>
+<text x="300" y="122" font-size="20" class="m">管理多部长篇小说，并保持资料彼此隔离。</text>
+<rect x="1310" y="42" width="235" height="56" rx="16" fill="#6C5CE7"/>
+<text x="1428" y="78" font-size="20" text-anchor="middle" class="w">+ 新建小说</text>
+<g>
+<rect x="300" y="145" width="360" height="120" rx="18" fill="#FFFFFF" stroke="#E7E9F0"/>
+<text x="328" y="213" font-size="40" fill="#6C5CE7" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">3</text>
+<text x="328" y="245" font-size="19" class="m">进行中的作品</text>
+<rect x="690" y="145" width="360" height="120" rx="18" fill="#FFFFFF" stroke="#E7E9F0"/>
+<text x="718" y="213" font-size="40" fill="#6C5CE7" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">126</text>
+<text x="718" y="245" font-size="19" class="m">累计章节</text>
+<rect x="1080" y="145" width="360" height="120" rx="18" fill="#FFFFFF" stroke="#E7E9F0"/>
+<text x="1108" y="213" font-size="40" fill="#6C5CE7" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">18</text>
+<text x="1108" y="245" font-size="19" class="m">活跃伏笔</text>
+</g>
+<rect x="300" y="315" width="1215" height="145" rx="20" fill="#FFFFFF" stroke="#E7E9F0"/>
+<rect x="328" y="339" width="80" height="80" rx="18" fill="#EEEAFE"/>
+<text x="368" y="390" font-size="30" text-anchor="middle" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif" fill="#6C5CE7">山</text>
+<text x="438" y="369" font-size="26" class="t">《山海问道》</text>
+<text x="438" y="404" font-size="18" class="m">传统玄幻 · 连载中</text>
+<rect x="1240" y="343" width="136" height="36" rx="18" fill="#EEF0FF"/>
+<text x="1308" y="367" font-size="17" text-anchor="middle" fill="#6C5CE7" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">第 42 章</text>
+<rect x="1240" y="407" width="225" height="14" rx="7" fill="#EEF0F4"/>
+<rect x="1240" y="407" width="162" height="14" rx="7" fill="#6C5CE7"/>
+<text x="1492" y="421" font-size="16" text-anchor="end" class="m">72%</text>
+<rect x="300" y="480" width="1215" height="145" rx="20" fill="#FFFFFF" stroke="#E7E9F0"/>
+<rect x="328" y="504" width="80" height="80" rx="18" fill="#E7F6F1"/>
+<text x="368" y="555" font-size="30" text-anchor="middle" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif" fill="#23A36D">刀</text>
+<text x="438" y="534" font-size="26" class="t">《长夜刀歌》</text>
+<text x="438" y="569" font-size="18" class="m">武侠 · 细纲整理中</text>
+<rect x="1240" y="508" width="136" height="36" rx="18" fill="#EEF0FF"/>
+<text x="1308" y="532" font-size="17" text-anchor="middle" fill="#6C5CE7" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">第 18 章</text>
+<rect x="1240" y="572" width="225" height="14" rx="7" fill="#EEF0F4"/>
+<rect x="1240" y="572" width="96" height="14" rx="7" fill="#6C5CE7"/>
+<text x="1492" y="586" font-size="16" text-anchor="end" class="m">43%</text>
+<rect x="300" y="645" width="1215" height="145" rx="20" fill="#FFFFFF" stroke="#E7E9F0"/>
+<rect x="328" y="669" width="80" height="80" rx="18" fill="#FFF2E6"/>
+<text x="368" y="720" font-size="30" text-anchor="middle" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif" fill="#F59E0B">星</text>
+<text x="438" y="699" font-size="26" class="t">《星河旧事》</text>
+<text x="438" y="734" font-size="18" class="m">仙侠 · 暂停</text>
+<rect x="1240" y="673" width="136" height="36" rx="18" fill="#EEF0FF"/>
+<text x="1308" y="697" font-size="17" text-anchor="middle" fill="#6C5CE7" font-family="Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif">第 66 章</text>
+<rect x="1240" y="737" width="225" height="14" rx="7" fill="#EEF0F4"/>
+<rect x="1240" y="737" width="198" height="14" rx="7" fill="#6C5CE7"/>
+<text x="1492" y="751" font-size="16" text-anchor="end" class="m">88%</text>
+<text x="1545" y="882" font-size="14" text-anchor="end" class="m">概念占位图 · 后续请替换为真实截图</text></svg>
