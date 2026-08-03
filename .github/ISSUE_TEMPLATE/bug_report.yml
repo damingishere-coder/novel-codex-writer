@@ -1,0 +1,90 @@
+name: Bug 报告
+description: 报告可复现的问题，帮助项目改进
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请先删除 API Key、登录缓存、个人信息和未公开小说正文。
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本或提交
+      description: 使用的 Release、分支或 commit SHA
+      placeholder: main / v0.1.0 / commit SHA
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: 运行环境
+      description: Windows、Docker Desktop、浏览器等版本
+      placeholder: Windows 11, Docker Desktop 4.x, Chrome
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 问题区域
+      options:
+        - 网页启动或 Docker
+        - 作品与文档管理
+        - Codex Skill
+        - 章节工作流
+        - 长期记忆或 memory patch
+        - DeepSeek / AI 审校
+        - 文档
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从干净状态开始，逐步说明如何出现问题
+      placeholder: |
+        1. 启动工作台
+        2. 创建小说
+        3. 打开……
+        4. 出现……
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 脱敏日志或截图
+      description: 不要包含 API Key、Token、Cookie、.env、Codex 会话或私密正文
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已经搜索过现有 Issue，没有发现相同问题
+          required: true
+        - label: 我已经删除密钥、登录信息和私密正文
+          required: true
+        - label: 我可以按上述步骤重复出现问题
+          required: true
