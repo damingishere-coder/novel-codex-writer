@@ -20,10 +20,13 @@ Novel Codex Writer 的目标是成为一个本地优先、作者可控、适合�
 
 - [x] 重构中英文 README
 - [x] 补齐 License、Contributing、Security 和文档入口
+- [x] 增加一套不含私密内容的示例小说
+- [x] 隔离个人小说数据、密钥、会话和运行缓存
+- [x] 增加 GitHub Actions、仓库安全测试与记忆系统功能测试
+- [x] 阻止 `activeProjectId` 跳出作品目录
 - [ ] 增加真实产品截图与操作 GIF
-- [ ] 增加一套不含私密内容的示例小说
 - [ ] 增加首次启动状态检查和更清晰的错误提示
-- [ ] 整理稳定的 GitHub Release 与升级说明
+- [ ] 创建稳定的 GitHub Release 与升级说明
 - [ ] 增加项目主页社交预览图
 
 ## v0.3：作者体验
