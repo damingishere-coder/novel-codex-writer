@@ -50,8 +50,8 @@
 ### 建议流程
 
 ```powershell
-git clone https://github.com/damingishere-coder/webnovel-writer-Skill.git
-cd webnovel-writer-Skill
+git clone https://github.com/damingishere-coder/novel-codex-writer.git
+cd novel-codex-writer
 git checkout -b feat/your-change
 ```
 
@@ -85,10 +85,28 @@ test: cover memory patch validation
 - 修改用户工作流时同步更新 README 或 `docs/`。
 - 中英文首页的核心能力与限制应保持一致。
 - 不要把临时开发记录、运行日志和测试数据库提交到仓库根目录。
+- 真实小说、`projects.json` 和 `.trash` 不得作为测试数据提交；请使用 `examples/demo-novel/` 或新增脱敏 fixture。
 
-## 测试与验证
+## 自动化测试
 
-提交 PR 前至少完成与你改动相关的验证：
+仓库的 GitHub Actions 会执行：
+
+```powershell
+python -m compileall -q .
+python -m unittest discover -s tests -p "test_*.py" -v
+```
+
+提交 PR 前应在本地执行相同命令。现有测试至少覆盖：
+
+- 个人小说数据和密钥类文件不会被 Git 跟踪。
+- 脱敏 Demo 的文件结构和 memory patch schema。
+- `check_chapter.py` 的章节号识别、字数统计和基础问题检测。
+
+新增或修改核心逻辑时，请同步增加对应测试，而不是只依赖手动验证。
+
+## 手动验证
+
+除了自动化测试，还应完成与你改动相关的验证：
 
 - 工作台能够正常启动和关闭。
 - 项目创建、切换、读取和保存不跨作品。
@@ -96,8 +114,6 @@ test: cover memory patch validation
 - 涉及记忆脚本时，先验证 dry-run，再验证正式应用。
 - 涉及章节检查时，覆盖正常输入和错误输入。
 - 涉及界面时，提供修改前后截图。
-
-若当前仓库尚无对应自动化测试，请在 PR 中写明手动验证步骤和结果。
 
 ## Pull Request 清单
 
@@ -110,6 +126,7 @@ test: cover memory patch validation
 - [ ] 没有无说明地改变小说目录或记忆数据格式
 - [ ] 对用户可见的变化已更新文档
 - [ ] 新增依赖有明确必要性
+- [ ] 自动化测试已通过
 
 ## License
 

@@ -6,8 +6,9 @@
 
 Manage multiple novels with structured outlines, chapter review, long-term memory, and a repeatable Codex Agent workflow.
 
-[中文](README.md) · [English](README.en.md) · [Quick Start](docs/quick-start.md) · [Workflow](docs/writing-workflow.md) · [Roadmap](ROADMAP.md)
+[中文](README.md) · [English](README.en.md) · [Quick Start](docs/quick-start.md) · [Sanitized Demo](examples/demo-novel/) · [Workflow](docs/writing-workflow.md) · [Roadmap](ROADMAP.md)
 
+[![CI](https://github.com/damingishere-coder/novel-codex-writer/actions/workflows/ci.yml/badge.svg)](https://github.com/damingishere-coder/novel-codex-writer/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D4.svg)
 ![Docker](https://img.shields.io/badge/runtime-Docker-2496ED.svg)
@@ -24,7 +25,7 @@ Generating one chapter is easy. Keeping a long novel consistent is not:
 
 - AI models forget character states, relationships, and unresolved clues over time.
 - Outlines, chapters, worldbuilding, and revision notes become fragmented.
-- Loading the entire project into every prompt is expensive and often creates contradictions.
+- Loading the entire project into every prompt is expensive and creates contradictions.
 - Chapters may be readable but still feel repetitive, uneventful, or obviously AI-written.
 - Managing several novels at once can cause cross-project contamination.
 
@@ -40,6 +41,22 @@ Novel Codex Writer uses **Markdown as the source of truth**, combined with a cur
 | Codex Skill | Give Codex explicit rules for selecting context and running project scripts |
 | AI-assisted review | Use DeepSeek for fast review or Codex for deeper review, with author approval |
 | Local-first storage | Keep manuscripts, settings, and secrets on your own machine |
+
+## Product preview
+
+> The following graphics are conceptual placeholders based on the current product structure, not captured application screenshots.
+
+### Multi-project library
+
+![Library concept](docs/images/01-library-dashboard.svg)
+
+### Drafting and AI review
+
+![Editor and review concept](docs/images/02-editor-review.svg)
+
+### Long-term memory and current state
+
+![Memory dashboard concept](docs/images/03-memory-dashboard.svg)
 
 ## How it works
 
@@ -58,6 +75,12 @@ flowchart LR
 
 The goal is not unrestricted autonomous generation. The goal is a workflow that can be inspected, corrected, and resumed safely.
 
+## Sanitized demo
+
+The fully fictional [Fog Harbor Letters demo](examples/demo-novel/) shows the complete chain from rough outline to chapter outline, shortened manuscript, review report, chapter commit, memory patch, and current-state projection.
+
+The demo is stored outside the personal library. Real manuscripts belong under `小说项目/作品/`; that directory, `小说项目/projects.json`, and `小说项目/.trash/` are ignored by Git to reduce the risk of publishing private work.
+
 ## Quick start
 
 ### Requirements
@@ -70,8 +93,8 @@ The goal is not unrestricted autonomous generation. The goal is a workflow that 
 ### 1. Get the repository
 
 ```powershell
-git clone https://github.com/damingishere-coder/webnovel-writer-Skill.git
-cd webnovel-writer-Skill
+git clone https://github.com/damingishere-coder/novel-codex-writer.git
+cd novel-codex-writer
 ```
 
 You may also use **Code → Download ZIP** on GitHub.
@@ -81,7 +104,7 @@ You may also use **Code → Download ZIP** on GitHub.
 From the project directory, double-click:
 
 - `启动网页.bat` to start Docker and open `http://localhost:5173/`
-- `关闭网页.bat` to stop the local services
+- `关闭网页.bat` to stop local services
 
 The first launch may take a few minutes while Docker builds and downloads dependencies.
 
@@ -114,7 +137,7 @@ The interface and built-in writing rules are currently Chinese-first. English do
 
 ### Authors
 
-Use the web workspace to manage outlines, chapters, characters, clues, and review reports without operating the internal scripts manually.
+Use the web workspace to manage outlines, chapters, characters, clues, and review reports without operating internal scripts manually.
 
 ### Codex and agent users
 
@@ -144,13 +167,14 @@ Each novel has an isolated directory:
 
 See [Project Structure](docs/project-structure.md) and [Writing Workflow](docs/writing-workflow.md) for details.
 
-## Privacy and AI services
+## Privacy and repository safety
 
 - Reading, editing, saving, and annotations work without an AI provider.
 - DeepSeek keys are stored in a local `.env` file and are never returned by the web API.
 - Codex reuses the authenticated state already available on the local machine.
-- Environment files, session caches, logs, and build outputs are ignored by Git.
-- Never commit real secrets, private manuscripts, or login caches to a public repository.
+- Environment files, session caches, logs, personal project indexes, manuscripts, and trash data are ignored by Git.
+- CI checks tracked files for common secret-like artifacts and personal novel data.
+- CI also compiles Python sources and validates the public demo and chapter checker smoke tests.
 
 See [SECURITY.md](SECURITY.md) for reporting and secret-handling guidance.
 
@@ -168,6 +192,7 @@ See [ROADMAP.md](ROADMAP.md) for planned work and [CHANGELOG.md](CHANGELOG.md) f
 ## Documentation
 
 - [Quick Start](docs/quick-start.md)
+- [Sanitized Demo](examples/demo-novel/)
 - [Writing Workflow](docs/writing-workflow.md)
 - [Project Structure](docs/project-structure.md)
 - [Troubleshooting](docs/troubleshooting.md)
