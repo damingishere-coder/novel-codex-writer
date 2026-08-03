@@ -7,70 +7,13 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  apply-path-guard:
-    name: Apply one-time path guard
-    if: github.event_name == 'pull_request' && github.head_ref == 'test/p0-memory-security-release'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    steps:
-      - name: Check out feature branch
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.head_ref }}
-
-      - name: Patch active project containment
-        shell: python
-        run: |
-          from pathlib import Path
-
-          path = Path("Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_common.py")
-          text = path.read_text(encoding="utf-8")
-          old = (
-              '    resolved = (library_root / "作品" / str(active_project_id)).resolve()\n'
-              '    if not resolved.exists():\n'
-              '        raise MemorySystemError(f"找不到当前小说目录：{resolved}")\n'
-              '    return resolved\n'
-          )
-          new = (
-              '    projects_root = (library_root / "作品").resolve()\n'
-              '    resolved = (projects_root / str(active_project_id)).resolve()\n'
-              '    try:\n'
-              '        resolved.relative_to(projects_root)\n'
-              '    except ValueError as exc:\n'
-              '        raise MemorySystemError(\n'
-              '            f"activeProjectId 非法，项目目录必须位于作品库内：{active_project_id!r}"\n'
-              '        ) from exc\n'
-              '    if resolved == projects_root:\n'
-              '        raise MemorySystemError("activeProjectId 不能指向作品库根目录。")\n'
-              '    if not resolved.exists():\n'
-              '        raise MemorySystemError(f"找不到当前小说目录：{resolved}")\n'
-              '    return resolved\n'
-          )
-          if old in text:
-              path.write_text(text.replace(old, new, 1), encoding="utf-8")
-          elif new not in text:
-              raise SystemExit("Expected resolve_project_root block was not found.")
-
-      - name: Commit path guard
-        run: |
-          if git diff --quiet; then
-            echo "Path guard already present."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_common.py
-          git commit -m "fix: prevent active project path traversal"
-          git push origin HEAD:${{ github.head_ref }}
-
   safety-and-smoke-tests:
     name: Safety and smoke tests
     runs-on: ubuntu-latest
