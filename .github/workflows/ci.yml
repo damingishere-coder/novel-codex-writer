@@ -33,25 +33,27 @@ jobs:
 
           path = Path("Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_common.py")
           text = path.read_text(encoding="utf-8")
-          old = '''    resolved = (library_root / "作品" / str(active_project_id)).resolve()
-          if not resolved.exists():
-              raise MemorySystemError(f"找不到当前小说目录：{resolved}")
-          return resolved
-          '''
-          new = '''    projects_root = (library_root / "作品").resolve()
-          resolved = (projects_root / str(active_project_id)).resolve()
-          try:
-              resolved.relative_to(projects_root)
-          except ValueError as exc:
-              raise MemorySystemError(
-                  f"activeProjectId 非法，项目目录必须位于作品库内：{active_project_id!r}"
-              ) from exc
-          if resolved == projects_root:
-              raise MemorySystemError("activeProjectId 不能指向作品库根目录。")
-          if not resolved.exists():
-              raise MemorySystemError(f"找不到当前小说目录：{resolved}")
-          return resolved
-          '''
+          old = (
+              '    resolved = (library_root / "作品" / str(active_project_id)).resolve()\n'
+              '    if not resolved.exists():\n'
+              '        raise MemorySystemError(f"找不到当前小说目录：{resolved}")\n'
+              '    return resolved\n'
+          )
+          new = (
+              '    projects_root = (library_root / "作品").resolve()\n'
+              '    resolved = (projects_root / str(active_project_id)).resolve()\n'
+              '    try:\n'
+              '        resolved.relative_to(projects_root)\n'
+              '    except ValueError as exc:\n'
+              '        raise MemorySystemError(\n'
+              '            f"activeProjectId 非法，项目目录必须位于作品库内：{active_project_id!r}"\n'
+              '        ) from exc\n'
+              '    if resolved == projects_root:\n'
+              '        raise MemorySystemError("activeProjectId 不能指向作品库根目录。")\n'
+              '    if not resolved.exists():\n'
+              '        raise MemorySystemError(f"找不到当前小说目录：{resolved}")\n'
+              '    return resolved\n'
+          )
           if old in text:
               path.write_text(text.replace(old, new, 1), encoding="utf-8")
           elif new not in text:
