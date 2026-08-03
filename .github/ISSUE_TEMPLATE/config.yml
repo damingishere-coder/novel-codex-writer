@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用文档
+    url: https://github.com/damingishere-coder/webnovel-writer-Skill/tree/main/docs
+    about: 提交 Issue 前先查看快速开始、工作流和排错说明
+  - name: 安全问题
+    url: https://github.com/damingishere-coder/webnovel-writer-Skill/security
+    about: 不要在公开 Issue 中粘贴密钥、登录状态或漏洞细节
