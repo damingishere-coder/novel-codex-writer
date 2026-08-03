@@ -4,7 +4,7 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号计划遵循语义化版本。
 
-## [Unreleased]
+## Unreleased
 
 ### Added
 
@@ -18,7 +18,7 @@
 - 重构中文 README，使首页从内部开发说明转为面向作者、Agent 用户和贡献者的产品入口。
 - 将章节流程、记忆机制和目录说明拆分到 `docs/`，降低首页阅读负担。
 
-## [0.1.0] - 2026-08-03
+## 0.1.0 - 2026-08-03
 
 ### Added
 
@@ -30,5 +30,4 @@
 - DeepSeek 快速审校与 Codex 深度审校入口。
 - 本地 `.env` 密钥保存和受限文件访问。
 
-[Unreleased]: https://github.com/damingishere-coder/webnovel-writer-Skill/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/damingishere-coder/webnovel-writer-Skill/releases/tag/v0.1.0
+> 正式创建 GitHub Release 和版本标签后，再补充对应比较链接。
