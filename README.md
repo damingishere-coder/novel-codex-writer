@@ -6,8 +6,9 @@
 
 用结构化大纲、章节审查、长期记忆与 Codex Agent 工作流，持续管理和创作多部长篇小说。
 
-[中文](README.md) · [English](README.en.md) · [快速开始](docs/quick-start.md) · [工作流](docs/writing-workflow.md) · [路线图](ROADMAP.md)
+[中文](README.md) · [English](README.en.md) · [快速开始](docs/quick-start.md) · [脱敏 Demo](examples/demo-novel/) · [工作流](docs/writing-workflow.md) · [路线图](ROADMAP.md)
 
+[![CI](https://github.com/damingishere-coder/novel-codex-writer/actions/workflows/ci.yml/badge.svg)](https://github.com/damingishere-coder/novel-codex-writer/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D4.svg)
 ![Docker](https://img.shields.io/badge/runtime-Docker-2496ED.svg)
@@ -16,16 +17,16 @@
 
 </div>
 
-> 这个项目不是“输入一句话，自动吐出整本小说”的生成器。它更像一个 AI 小说创作操作系统：让作者保留最终控制权，同时让 Agent 按固定流程整理大纲、准备上下文、创作章节、检查问题并维护长期记忆。
+> 这个项目不是“输入一句话，自动吐出整本小说”的生成器。它更像一个 AI 小说创作操作系统：作者保留最终控制权，Agent 按固定流程整理大纲、准备上下文、创作章节、检查问题并维护长期记忆。
 
 ## 为什么需要它
 
-长篇 AI 写作真正困难的并不是生成一章文字，而是长期保持一致：
+长篇 AI 写作真正困难的不是生成一章文字，而是长期保持一致：
 
 - 写到几十章后，AI 容易忘记人物状态、关系和伏笔。
 - 大纲、正文、设定和修改记录分散，难以持续管理。
-- 每次都把全部历史塞入上下文，成本高且容易产生冲突。
-- 章节虽然“能读”，却可能流水账、缺少推进，或带有明显 AI 腔。
+- 每次把全部历史塞进上下文，成本高且容易产生冲突。
+- 章节虽然“能读”，却可能流水账、缺少推进或带有明显 AI 腔。
 - 多本小说并行时，资料容易串书或相互污染。
 
 Novel Codex Writer 通过 **Markdown 事实源 + 当前状态投影 + 可重建索引 + 章节工作流**，让 Agent 只读取当下真正需要的资料。
@@ -43,7 +44,7 @@ Novel Codex Writer 通过 **Markdown 事实源 + 当前状态投影 + 可重建�
 
 ## 产品预览
 
-> 以下为根据当前功能和数据结构制作的概念占位图，并非真实运行截图。后续可以直接用相同文件名替换为实际截图，README 无需再次修改。
+> 以下为根据当前功能和数据结构制作的概念占位图，并非真实运行截图。后续可直接用相同文件名替换为实际截图，README 无需再次修改。
 
 ### 多作品管理
 
@@ -74,6 +75,17 @@ flowchart LR
 
 这套流程的重点不是让 AI 自由发挥到失控，而是把创作拆成可检查、可回退、可追踪的步骤。
 
+## 脱敏 Demo
+
+不想先准备自己的小说，可以浏览完全虚构的 [《雾港来信》Demo](examples/demo-novel/)。它展示了：
+
+- 原始大纲与章节细纲如何衔接。
+- 正文如何对应 S1-S4 审查报告。
+- 章节提交如何记录剧情、人物、关系和伏笔变化。
+- memory patch 如何更新 `记忆库/current/`。
+
+Demo 与真实作品目录完全分离。真实小说应保存在本机 `小说项目/作品/`，该目录和 `projects.json`、`.trash/` 已被 Git 忽略，避免误传正文。
+
 ## 快速开始
 
 ### 环境要求
@@ -88,8 +100,8 @@ flowchart LR
 克隆仓库，或在 GitHub 页面点击 **Code → Download ZIP**：
 
 ```powershell
-git clone https://github.com/damingishere-coder/webnovel-writer-Skill.git
-cd webnovel-writer-Skill
+git clone https://github.com/damingishere-coder/novel-codex-writer.git
+cd novel-codex-writer
 ```
 
 ### 2. 启动本地工作台
@@ -160,13 +172,14 @@ cd webnovel-writer-Skill
 
 详细说明见 [项目结构](docs/project-structure.md) 和 [写作工作流](docs/writing-workflow.md)。
 
-## AI 与隐私
+## AI、隐私与仓库安全
 
 - 未配置任何 AI 服务时，阅读、编辑、保存和批注仍可使用。
-- DeepSeek 密钥仅保存在本机 `.env`，网页 API 不返回真实密钥。
-- Codex 使用本机已有的登录状态，不需要把账号凭据写入仓库。
+- DeepSeek 密钥只保存在本机 `.env`，网页 API 不返回真实密钥。
+- Codex 使用本机已有登录状态，不需要把账号凭据写入仓库。
 - `.env`、会话缓存、日志和构建产物已被 Git 忽略。
-- 请勿把真实密钥、私密正文或登录缓存提交到公共仓库。
+- `小说项目/projects.json`、`小说项目/作品/` 和 `小说项目/.trash/` 默认不会提交到公共仓库。
+- GitHub Actions 会检查敏感文件、个人作品数据、Demo schema 和 Python 基础可运行性。
 
 安全问题与密钥泄漏处理方式见 [SECURITY.md](SECURITY.md)。
 
@@ -175,7 +188,7 @@ cd webnovel-writer-Skill
 当前版本面向本地个人创作，仍处于持续迭代阶段：
 
 - 主要启动流程针对 Windows + Docker Desktop。
-- Codex 和 DeepSeek 均为可选能力，实际输出质量取决于模型与作者提供的资料。
+- Codex 和 DeepSeek 均为可选能力，实际输出质量取决于模型与作者资料。
 - 章节检查能发现确定性问题和常见写作问题，但不能替代作者判断。
 - 项目强调人工确认，不以无人值守批量生成整本小说为目标。
 
@@ -184,6 +197,7 @@ cd webnovel-writer-Skill
 ## 文档
 
 - [快速开始](docs/quick-start.md)
+- [脱敏 Demo](examples/demo-novel/)
 - [完整写作工作流](docs/writing-workflow.md)
 - [项目目录与数据说明](docs/project-structure.md)
 - [常见问题与排错](docs/troubleshooting.md)
