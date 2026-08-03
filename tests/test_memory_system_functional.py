@@ -146,7 +146,8 @@ class MemorySystemFunctionalTests(unittest.TestCase):
     def test_update_memory_is_idempotent_and_rejects_changed_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             project_root = Path(temp_dir) / "demo"
-            (project_root / "记忆库" / "current").mkdir(parents=True)
+            current_dir = project_root / "记忆库" / "current"
+            current_dir.mkdir(parents=True)
             (project_root / "章节提交").mkdir(parents=True)
             patch_path = Path(temp_dir) / "patch.json"
             patch_path.write_text(
@@ -156,8 +157,8 @@ class MemorySystemFunctionalTests(unittest.TestCase):
             command = [
                 sys.executable,
                 str(UPDATE_MEMORY_PATH),
-                "--project-root",
-                str(project_root),
+                "--current-dir",
+                str(current_dir),
                 "--patch",
                 str(patch_path),
             ]
