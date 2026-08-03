@@ -35,8 +35,12 @@ class ChapterCheckerSmokeTests(unittest.TestCase):
         self.assertEqual(number, 1)
 
     def test_extracts_chapter_number_from_heading(self) -> None:
-        number = CHECKER.extract_chapter_number(Path("draft.md"), "# 第十二章 风雨夜")
+        number = CHECKER.extract_chapter_number(Path("draft.md"), "# 第012章 风雨夜")
         self.assertEqual(number, 12)
+
+    def test_chinese_numeral_heading_is_not_silently_misread(self) -> None:
+        number = CHECKER.extract_chapter_number(Path("draft.md"), "# 第十二章 风雨夜")
+        self.assertIsNone(number)
 
     def test_engineering_term_is_reported(self) -> None:
         findings = []
