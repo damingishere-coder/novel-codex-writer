@@ -1,11 +1,9 @@
-# Preview image replacement guide
+# Product preview screenshots
 
-The three files in this directory are temporary concept placeholders generated from the current product workflow:
+The root `README.md` and `README.en.md` use these full-resolution application screenshots:
 
-- `01-library-dashboard.svg`
-- `02-editor-review.svg`
-- `03-memory-dashboard.svg`
+- `01-writing-task.png`
+- `02-editor-review.png`
+- `03-timeline.png`
 
-When real screenshots are available, keep the same filenames or update the paths in the root `README.md`.
-
-Recommended real screenshot size: `1600 × 900` or another 16:9 resolution. Before uploading, remove API keys, private manuscript text, local paths, account information, and other sensitive data.
+Keep screenshots free of API keys, local paths, account information, and other secrets.
