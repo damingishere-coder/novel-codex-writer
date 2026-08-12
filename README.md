@@ -44,19 +44,17 @@ Novel Codex Writer 通过 **Markdown 事实源 + 当前状态投影 + 可重建�
 
 ## 产品预览
 
-> 以下为根据当前功能和数据结构制作的概念占位图，并非真实运行截图。后续可直接用相同文件名替换为实际截图，README 无需再次修改。
+### 本章写作任务书
 
-### 多作品管理
-
-![作品库概念图](docs/images/01-library-dashboard.svg)
+![本章写作任务书](docs/images/01-writing-task.png)
 
 ### 正文编辑与 AI 审校
 
-![正文编辑与审校概念图](docs/images/02-editor-review.svg)
+![正文编辑与 AI 审校](docs/images/02-editor-review.png)
 
-### 长期记忆与当前状态
+### 小说时间线与长期记忆
 
-![长期记忆概念图](docs/images/03-memory-dashboard.svg)
+![小说时间线与长期记忆](docs/images/03-timeline.png)
 
 ## 它如何工作
 
