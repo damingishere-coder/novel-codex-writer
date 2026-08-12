@@ -44,19 +44,17 @@ Novel Codex Writer uses **Markdown as the source of truth**, combined with a cur
 
 ## Product preview
 
-> The following graphics are conceptual placeholders based on the current product structure, not captured application screenshots.
+### Chapter writing brief
 
-### Multi-project library
-
-![Library concept](docs/images/01-library-dashboard.svg)
+![Chapter writing brief](docs/images/01-writing-task.png)
 
 ### Drafting and AI review
 
-![Editor and review concept](docs/images/02-editor-review.svg)
+![Drafting and AI review](docs/images/02-editor-review.png)
 
-### Long-term memory and current state
+### Story timeline and long-term memory
 
-![Memory dashboard concept](docs/images/03-memory-dashboard.svg)
+![Story timeline and long-term memory](docs/images/03-timeline.png)
 
 ## How it works
 
