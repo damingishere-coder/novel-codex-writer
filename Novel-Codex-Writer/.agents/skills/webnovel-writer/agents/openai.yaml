@@ -1,0 +1,4 @@
+interface:
+  display_name: "长篇网文写作工作台"
+  short_description: "稳定管理多作品写作、审查、记忆与章节最终化"
+  default_prompt: "使用 $webnovel-writer 处理当前已登记小说；先诊断创作进度和 revision，再给出唯一安全下一步。"

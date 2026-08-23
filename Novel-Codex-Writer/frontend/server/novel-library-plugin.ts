@@ -33,6 +33,23 @@ import {
   type ChapterReviewRun,
   type ReviewFinding
 } from "./chapter-review";
+import {
+  ApiError,
+  assertNoSymlinkEscape,
+  atomicWriteFile,
+  atomicWriteJson,
+  exportBookMarkdown,
+  exportProjectZip,
+  listDocumentVersions,
+  listTrashEntries,
+  previewVersionDiff,
+  restoreDocumentVersion,
+  restoreTrashEntry,
+  saveHistoryVersion
+} from "./file-storage";
+import { getWorkflowStatus, runWorkflowAction } from "./workflow-api";
+import type { ReviewProvider } from "./review-provider";
+import { readJsonBody, validateLocalRequest } from "./api-security";
 
 type GroupId =
   | "chapters"
@@ -129,6 +146,25 @@ interface ReviewSessionBody {
   annotations?: unknown;
   chapterReviewRuns?: unknown;
   updatedAt?: unknown;
+  sessionRevision?: unknown;
+  expectedRevision?: unknown;
+}
+
+interface VersionRestoreBody {
+  versionId?: unknown;
+  expectedRevision?: unknown;
+}
+
+interface TrashRestoreBody {
+  entryId?: unknown;
+}
+
+interface WorkflowActionBody {
+  action?: unknown;
+  chapter?: unknown;
+  patchPath?: unknown;
+  confirmed?: unknown;
+  classifications?: unknown;
 }
 
 interface ReviewChapterBody {
@@ -151,10 +187,12 @@ const envFile = resolve(workspaceRoot, ".env");
 const suggestionSchemaFile = resolve(serverDir, "ai-suggestion.schema.json");
 const chapterReviewSchemaFile = resolve(serverDir, "ai-chapter-review.schema.json");
 const verificationSchemaFile = resolve(serverDir, "ai-verification.schema.json");
+const deepSeekModel = "deepseek-v4-flash";
+const documentCache = new Map<string, { mtimeMs: number; size: number; content: string; revision: string }>();
 
 const defaultAiSettings: AiSettings = {
-  engine: "deepseek",
-  model: "deepseek-v4-flash",
+  engine: "codex",
+  model: deepSeekModel,
   reasoningEffort: "medium",
   includeStyleGuide: true,
   includeWritingTaskbook: true
@@ -231,13 +269,14 @@ const groupDefinitions: GroupDefinition[] = [
     label: "章节提交",
     description: "每章改变了什么的结构化记录",
     root: "章节提交",
-    recursive: false
+    recursive: false,
+    matcher: (relativePath) => !/memory_patch.*\.md$/i.test(relativePath)
   },
   {
     id: "memoryPatches",
     label: "memory_patch",
     description: "章节对记忆库的更新建议",
-    root: "记忆库",
+    root: "章节提交",
     recursive: false,
     matcher: (relativePath) => /memory_patch.*\.md$/i.test(relativePath)
   },
@@ -254,6 +293,15 @@ export function novelLibraryPlugin(): Plugin {
   return {
     name: "novel-library-api",
     configureServer(server) {
+      server.middlewares.use("/api", (req, res, next) => {
+        try {
+          validateLocalRequest(req);
+          next();
+        } catch (error) {
+          sendError(res, error);
+        }
+      });
+
       server.middlewares.use("/api/projects", async (req, res) => {
         try {
           await handleProjects(req, res);
@@ -280,10 +328,72 @@ export function novelLibraryPlugin(): Plugin {
         }
       });
 
+      server.middlewares.use("/api/versions", async (req, res) => {
+        try {
+          await handleVersions(req, res);
+        } catch (error) {
+          sendError(res, error);
+        }
+      });
+
+      server.middlewares.use("/api/trash", async (req, res) => {
+        try {
+          await handleTrash(req, res);
+        } catch (error) {
+          sendError(res, error);
+        }
+      });
+
+      server.middlewares.use("/api/export", async (req, res) => {
+        try {
+          await handleBookExport(req, res);
+        } catch (error) {
+          sendError(res, error);
+        }
+      });
+
+      server.middlewares.use("/api/workflow/status", async (req, res) => {
+        try {
+          const project = await selectProject(req);
+          const chapterValue = getRequestUrl(req).searchParams.get("chapter");
+          const chapter = chapterValue ? normalizePositiveInteger(chapterValue, "chapter") : undefined;
+          sendJson(res, 200, await getWorkflowStatus({ projectRoot: getProjectRoot(project), projectId: project.id, chapter }));
+        } catch (error) {
+          sendError(res, error);
+        }
+      });
+
+      server.middlewares.use("/api/workflow/actions", async (req, res) => {
+        try {
+          if ((req.method ?? "GET") !== "POST") throw new HttpError(405, "只支持提交工作流动作。");
+          const project = await selectProject(req);
+          const body = await readJsonBody<WorkflowActionBody>(req);
+          if (typeof body.action !== "string") throw new HttpError(400, "缺少工作流 action。");
+          const chapter = normalizePositiveInteger(body.chapter, "chapter");
+          const classifications = body.classifications && typeof body.classifications === "object" && !Array.isArray(body.classifications)
+            ? body.classifications as Record<string, string>
+            : undefined;
+          sendJson(res, 200, await runWorkflowAction({
+            action: body.action,
+            projectRoot: getProjectRoot(project),
+            projectId: project.id,
+            libraryRoot,
+            workspaceRoot,
+            chapter,
+            patchPath: typeof body.patchPath === "string" ? body.patchPath : undefined,
+            confirmed: body.confirmed === true,
+            classifications
+          }));
+        } catch (error) {
+          sendError(res, error);
+        }
+      });
+
       server.middlewares.use("/api/search", async (req, res) => {
         try {
           const url = getRequestUrl(req);
           const query = (url.searchParams.get("q") ?? "").trim();
+          if (query.length > 200) throw new HttpError(400, "搜索关键词不能超过 200 个字符。");
           if (!query) {
             sendJson(res, 200, { query, results: [] });
             return;
@@ -336,7 +446,7 @@ export function novelLibraryPlugin(): Plugin {
           await handleAiSuggest(req, res);
         } catch (error) {
           if (!res.headersSent) sendError(res, error);
-          else sendNdjson(res, { type: "error", message: getErrorMessage(error) }, true);
+          else sendNdjson(res, { type: "error", message: redactErrorMessage(getErrorMessage(error)) }, true);
         }
       });
 
@@ -345,7 +455,7 @@ export function novelLibraryPlugin(): Plugin {
           await handleAiReviewChapter(req, res);
         } catch (error) {
           if (!res.headersSent) sendError(res, error);
-          else sendNdjson(res, { type: "error", message: getErrorMessage(error) }, true);
+          else sendNdjson(res, { type: "error", message: redactErrorMessage(getErrorMessage(error)) }, true);
         }
       });
     }
@@ -420,12 +530,18 @@ async function handleDocument(req: IncomingMessage, res: ServerResponse) {
     if (typeof body.content !== "string") {
       throw new HttpError(400, "保存文档时缺少 content 字符串。");
     }
+    if (body.content.length > 1_900_000) throw new HttpError(413, "单个文档内容不能超过 1.9 MiB。");
+    if (typeof body.expectedRevision !== "string") {
+      throw new HttpError(400, "保存文档必须提供 expectedRevision，用于防止并发覆盖。");
+    }
 
-    if (typeof body.expectedRevision === "string" && existsSync(resolveProjectFile(getProjectRoot(project), requestedPath))) {
+    if (existsSync(resolveProjectFile(getProjectRoot(project), requestedPath))) {
       const current = await readDocument(project, requestedPath);
       if (current.revision !== body.expectedRevision) {
         throw new HttpError(409, "文档已被其他程序修改。已阻止覆盖，请重新载入后再保存。");
       }
+    } else if (body.expectedRevision !== "") {
+      throw new HttpError(409, "目标文档尚不存在，但 expectedRevision 不是空值。");
     }
 
     const document = await writeDocument(project, requestedPath, body.content);
@@ -442,6 +558,76 @@ async function handleDocument(req: IncomingMessage, res: ServerResponse) {
   }
 
   throw new HttpError(405, "不支持的文档接口请求。");
+}
+
+async function handleVersions(req: IncomingMessage, res: ServerResponse) {
+  const method = req.method ?? "GET";
+  const project = await selectProject(req);
+  const url = getRequestUrl(req);
+  const documentPath = url.searchParams.get("path");
+  if (!documentPath) throw new HttpError(400, "缺少版本对应的文档 path。");
+  const projectRoot = getProjectRoot(project);
+  const target = resolveProjectFile(projectRoot, documentPath);
+  if (!existsSync(target)) throw new HttpError(404, "找不到对应文档。");
+  if (method === "GET") {
+    const versionId = url.searchParams.get("versionId");
+    if (versionId) {
+      const current = await readFile(target, "utf8");
+      sendJson(res, 200, await previewVersionDiff(projectRoot, documentPath, versionId, current));
+      return;
+    }
+    sendJson(res, 200, {
+      path: normalizeRelativePath(documentPath),
+      currentRevision: createRevision(await readFile(target, "utf8")),
+      versions: await listDocumentVersions(projectRoot, documentPath)
+    });
+    return;
+  }
+  if (method === "POST") {
+    const body = await readJsonBody<VersionRestoreBody>(req);
+    if (typeof body.versionId !== "string" || typeof body.expectedRevision !== "string") {
+      throw new HttpError(400, "恢复版本必须提供 versionId 和 expectedRevision。");
+    }
+    await restoreDocumentVersion(projectRoot, documentPath, body.versionId, target, body.expectedRevision);
+    documentCache.delete(target);
+    await touchProject(project.id);
+    sendJson(res, 200, await readDocument(project, documentPath));
+    return;
+  }
+  throw new HttpError(405, "不支持的版本接口请求。");
+}
+
+async function handleTrash(req: IncomingMessage, res: ServerResponse) {
+  const method = req.method ?? "GET";
+  const project = await selectProject(req);
+  if (method === "GET") {
+    sendJson(res, 200, { entries: await listTrashEntries(libraryRoot, trashDir, project.id) });
+    return;
+  }
+  if (method === "POST") {
+    const body = await readJsonBody<TrashRestoreBody>(req);
+    if (typeof body.entryId !== "string") throw new HttpError(400, "缺少回收站 entryId。");
+    const restored = await restoreTrashEntry(trashDir, getProjectRoot(project), project.id, body.entryId);
+    await touchProject(project.id);
+    sendJson(res, 200, restored);
+    return;
+  }
+  throw new HttpError(405, "不支持的回收站接口请求。");
+}
+
+async function handleBookExport(req: IncomingMessage, res: ServerResponse) {
+  if ((req.method ?? "GET") !== "POST") throw new HttpError(405, "只支持创建导出文件。");
+  const project = await selectProject(req);
+  const type = getRequestUrl(req).searchParams.get("type");
+  if (type === "markdown") {
+    sendJson(res, 200, await exportBookMarkdown(getProjectRoot(project), project.name));
+    return;
+  }
+  if (type === "zip") {
+    sendJson(res, 200, await exportProjectZip(getProjectRoot(project), project));
+    return;
+  }
+  throw new HttpError(400, "导出 type 只能是 markdown 或 zip。");
 }
 
 async function buildLibrary(project: ProjectSummary) {
@@ -495,19 +681,18 @@ async function readGroupEntries(projectRoot: string, definition: GroupDefinition
       }))
       .filter(({ relativePath }) => !definition.matcher || definition.matcher(relativePath))
       .map(async ({ absolutePath, relativePath }) => {
-        const content = await readFile(absolutePath, "utf8");
-        const fileStat = await stat(absolutePath);
+        const cached = await readCachedDocument(absolutePath);
         return {
           id: relativePath,
-          title: extractTitle(content, relativePath),
+          title: extractTitle(cached.content, relativePath),
           path: relativePath,
           fileName: relativePath.split("/").at(-1) ?? relativePath,
           groupId: definition.id,
           groupLabel: definition.label,
           section: relativePath.split("/").slice(0, -1).join("/") || definition.root,
-          size: fileStat.size,
-          wordCount: countReadableWords(content),
-          updatedAt: fileStat.mtime.toISOString(),
+          size: cached.size,
+          wordCount: countReadableWords(cached.content),
+          updatedAt: new Date(cached.mtimeMs).toISOString(),
           chapterNumber: extractChapterNumber(relativePath)
         } satisfies DocumentEntry;
       })
@@ -521,6 +706,7 @@ async function collectMarkdownFiles(root: string, recursive: boolean): Promise<s
   const files = await Promise.all(
     entries.map(async (entry) => {
       const absolutePath = join(root, entry.name);
+      if (entry.name.startsWith(".")) return [];
       if (entry.isDirectory() && recursive) {
         return collectMarkdownFiles(absolutePath, recursive);
       }
@@ -536,29 +722,48 @@ async function collectMarkdownFiles(root: string, recursive: boolean): Promise<s
   return files.flat();
 }
 
+async function readCachedDocument(target: string) {
+  const fileStat = await stat(target);
+  const cached = documentCache.get(target);
+  if (cached && cached.mtimeMs === fileStat.mtimeMs && cached.size === fileStat.size) return cached;
+  const content = await readFile(target, "utf8");
+  const next = {
+    mtimeMs: fileStat.mtimeMs,
+    size: fileStat.size,
+    content,
+    revision: createRevision(content)
+  };
+  documentCache.set(target, next);
+  return next;
+}
+
 async function readDocument(project: ProjectSummary, requestedPath: string) {
   const projectRoot = getProjectRoot(project);
   const target = resolveProjectFile(projectRoot, requestedPath);
-  const content = await readFile(target, "utf8");
-  const fileStat = await stat(target);
+  const cached = await readCachedDocument(target);
   const relativePath = toProjectPath(projectRoot, target);
 
   return {
     path: relativePath,
-    title: extractTitle(content, relativePath),
-    content,
-    updatedAt: fileStat.mtime.toISOString(),
-    size: fileStat.size,
-    wordCount: countReadableWords(content),
-    revision: createRevision(content)
+    title: extractTitle(cached.content, relativePath),
+    content: cached.content,
+    updatedAt: new Date(cached.mtimeMs).toISOString(),
+    size: cached.size,
+    wordCount: countReadableWords(cached.content),
+    revision: cached.revision
   };
 }
 
 async function writeDocument(project: ProjectSummary, requestedPath: string, content: string) {
   const projectRoot = getProjectRoot(project);
   const target = resolveProjectFile(projectRoot, requestedPath);
-  await mkdir(dirname(target), { recursive: true });
-  await writeFile(target, content, "utf8");
+  if (existsSync(target)) {
+    const previous = await readFile(target, "utf8");
+    if (previous === content) return readDocument(project, requestedPath);
+    await saveHistoryVersion(projectRoot, normalizeRelativePath(requestedPath), previous);
+  }
+  await atomicWriteFile(target, content);
+  documentCache.delete(target);
   return readDocument(project, requestedPath);
 }
 
@@ -576,6 +781,7 @@ async function trashDocument(project: ProjectSummary, requestedPath: string) {
   assertInside(destinationRoot, destination, "回收站文件路径越界。");
   await mkdir(dirname(destination), { recursive: true });
   await rename(target, destination);
+  documentCache.delete(target);
 
   return {
     deleted: true,
@@ -589,7 +795,7 @@ async function searchLibrary(query: string, project: ProjectSummary, entries: Do
   const results: Array<{ entry: DocumentEntry; score: number; snippet: string }> = [];
 
   for (const entry of entries) {
-    const content = await readFile(resolveProjectFile(projectRoot, entry.path), "utf8");
+    const content = (await readCachedDocument(resolveProjectFile(projectRoot, entry.path))).content;
     const match = matchSearchDocument(query, { title: entry.title, path: entry.path, content });
     if (match) results.push({ entry, ...match });
   }
@@ -630,10 +836,10 @@ function buildFeatured(entries: DocumentEntry[]) {
   return {
     latestChapter,
     context: byPath.get("记忆库/current/本章写作任务书.md"),
-    activeCharacters: byPath.get("记忆库/current/活跃角色状态.md"),
-    activeForeshadowing: byPath.get("记忆库/current/活跃伏笔清单.md"),
+    activeCharacters: byPath.get("记忆库/current/当前人物状态.md"),
+    activeForeshadowing: byPath.get("记忆库/current/当前伏笔状态.md"),
     timeline: byPath.get("记忆库/current/当前时间线.md"),
-    facts: byPath.get("记忆库/current/当前不可违背事实.md"),
+    facts: byPath.get("记忆库/current/不可违背事实.md"),
     review: latestChapterNumber ? findChapterRelated(entries, "reviews", latestChapterNumber) : undefined,
     commit: latestChapterNumber ? findChapterRelated(entries, "commits", latestChapterNumber) : undefined,
     memoryPatch: latestChapterNumber ? findChapterRelated(entries, "memoryPatches", latestChapterNumber) : undefined
@@ -666,7 +872,7 @@ async function createProject(name: string): Promise<ProjectSummary> {
       await writeFile(resolve(target, ".gitkeep"), "", "utf8");
     })
   );
-  await writeFile(resolve(projectRoot, "project.json"), `${JSON.stringify(project, null, 2)}\n`, "utf8");
+  await atomicWriteJson(resolve(projectRoot, "project.json"), project);
 
   index.projects.push(project);
   index.activeProjectId = project.id;
@@ -682,7 +888,7 @@ async function updateProject(id: string, body: ProjectBody): Promise<ProjectSumm
   }
 
   if (typeof body.name === "string" && body.name.trim()) {
-    project.name = body.name.trim();
+    project.name = normalizeProjectName(body.name);
   }
 
   if (body.active === true) {
@@ -710,6 +916,9 @@ async function deleteProject(id: string) {
     assertInside(trashDir, destination, "项目回收站路径越界。");
     await mkdir(dirname(destination), { recursive: true });
     await rename(projectRoot, destination);
+    for (const key of Array.from(documentCache.keys())) {
+      if (key.startsWith(`${projectRoot}${sep}`)) documentCache.delete(key);
+    }
     trashedPath = relative(libraryRoot, destination).split(sep).join("/");
   }
 
@@ -739,7 +948,7 @@ async function touchProject(id: string) {
 async function writeProjectMeta(project: ProjectSummary) {
   const projectRoot = getProjectRoot(project);
   if (!existsSync(projectRoot)) return;
-  await writeFile(resolve(projectRoot, "project.json"), `${JSON.stringify(project, null, 2)}\n`, "utf8");
+  await atomicWriteJson(resolve(projectRoot, "project.json"), project);
 }
 
 async function getProjectListPayload() {
@@ -769,7 +978,7 @@ async function selectProject(req: IncomingMessage): Promise<ProjectSummary> {
 }
 
 async function loadProjectIndex(): Promise<ProjectIndex> {
-  await ensureLibraryStore();
+  if (!existsSync(projectsFile)) return { activeProjectId: null, projects: [] };
 
   const raw = await readFile(projectsFile, "utf8");
   const parsed = JSON.parse(raw) as Partial<ProjectIndex>;
@@ -787,10 +996,6 @@ async function loadProjectIndex(): Promise<ProjectIndex> {
       ? parsed.activeProjectId
       : (projects[0]?.id ?? null);
 
-  if (projects.length !== indexedProjects.length || activeProjectId !== parsed.activeProjectId) {
-    await saveProjectIndex({ activeProjectId, projects });
-  }
-
   return { activeProjectId, projects };
 }
 
@@ -803,17 +1008,7 @@ async function saveProjectIndex(index: ProjectIndex) {
     }))
   };
 
-  await writeFile(projectsFile, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
-}
-
-async function ensureLibraryStore() {
-  await mkdir(projectsDir, { recursive: true });
-  await mkdir(trashDir, { recursive: true });
-
-  if (!existsSync(projectsFile)) {
-    const initial: ProjectIndex = { activeProjectId: null, projects: [] };
-    await writeFile(projectsFile, `${JSON.stringify(initial, null, 2)}\n`, "utf8");
-  }
+  await atomicWriteJson(projectsFile, normalized);
 }
 
 function isProjectSummary(value: unknown): value is ProjectSummary {
@@ -842,12 +1037,14 @@ function resolveProjectFile(projectRoot: string, relativePath: string) {
     throw new HttpError(400, "只能读取或保存 Markdown 文件。");
   }
 
+  assertNoSymlinkEscape(projectRoot, target);
+
   return target;
 }
 
 function normalizeRelativePath(relativePath: string) {
   const normalizedPath = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
-  if (!normalizedPath || normalizedPath.includes("\0")) {
+  if (!normalizedPath || normalizedPath.includes("\0") || normalizedPath.length > 500 || normalizedPath.split("/").includes("..")) {
     throw new HttpError(400, "非法路径。");
   }
 
@@ -903,15 +1100,35 @@ async function handleReviewSession(req: IncomingMessage, res: ServerResponse) {
       return;
     }
     const session = JSON.parse(await readFile(sessionFile, "utf8")) as ReviewSessionBody;
-    sendJson(res, 200, normalizeReviewSession(session, project.id, documentPath));
+    sendJson(res, 200, normalizeReviewSession(session, project.id, documentPath, false));
     return;
   }
 
   if (method === "PUT") {
     const body = await readJsonBody<ReviewSessionBody>(req);
-    const session = normalizeReviewSession(body, project.id, documentPath);
+    if (typeof body.expectedRevision !== "string") {
+      throw new HttpError(400, "保存批注会话必须提供 expectedRevision。");
+    }
+    let currentRevision = "";
+    if (existsSync(sessionFile)) {
+      const stored = normalizeReviewSession(
+        JSON.parse(await readFile(sessionFile, "utf8")) as ReviewSessionBody,
+        project.id,
+        documentPath,
+        false
+      );
+      currentRevision = stored.sessionRevision;
+    }
+    if (body.expectedRevision !== currentRevision) {
+      throw new HttpError(409, "批注会话已被其他请求修改，请重新载入后再保存。");
+    }
+    const document = await readDocument(project, documentPath);
+    if (typeof body.baseRevision !== "string" || body.baseRevision !== document.revision) {
+      throw new HttpError(409, "批注会话绑定的正文 revision 已过期，请重新载入正文。");
+    }
+    const session = normalizeReviewSession(body, project.id, documentPath, true);
     await mkdir(sessionsRoot, { recursive: true });
-    await writeFile(sessionFile, `${JSON.stringify(session, null, 2)}\n`, "utf8");
+    await atomicWriteJson(sessionFile, session);
     sendJson(res, 200, session);
     return;
   }
@@ -921,7 +1138,8 @@ async function handleReviewSession(req: IncomingMessage, res: ServerResponse) {
     const session = normalizeReviewSession(
       JSON.parse(await readFile(sessionFile, "utf8")) as ReviewSessionBody,
       project.id,
-      documentPath
+      documentPath,
+      false
     );
     const exportPath = await exportReviewSession(project, session);
     sendJson(res, 200, { path: exportPath });
@@ -933,18 +1151,19 @@ async function handleReviewSession(req: IncomingMessage, res: ServerResponse) {
 
 function createEmptyReviewSession(projectId: string, documentPath: string) {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     projectId,
     documentPath,
     baseRevision: "",
     status: "active",
     annotations: [],
     chapterReviewRuns: [],
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    sessionRevision: ""
   };
 }
 
-function normalizeReviewSession(body: ReviewSessionBody, projectId: string, documentPath: string) {
+function normalizeReviewSession(body: ReviewSessionBody, projectId: string, documentPath: string, touch: boolean) {
   if (body.projectId !== undefined && body.projectId !== projectId) {
     throw new HttpError(403, "不能把其他小说的批注写入当前作品。");
   }
@@ -958,8 +1177,8 @@ function normalizeReviewSession(body: ReviewSessionBody, projectId: string, docu
     throw new HttpError(400, "整章审阅记录格式不正确。");
   }
 
-  return {
-    schemaVersion: 3,
+  const normalized = {
+    schemaVersion: 4,
     projectId,
     documentPath,
     baseRevision: typeof body.baseRevision === "string" ? body.baseRevision : "",
@@ -968,7 +1187,13 @@ function normalizeReviewSession(body: ReviewSessionBody, projectId: string, docu
     chapterReviewRuns: Array.isArray(body.chapterReviewRuns)
       ? body.chapterReviewRuns.map(normalizeChapterReviewRun).filter((item): item is ChapterReviewRun => Boolean(item)).slice(0, 20)
       : [],
-    updatedAt: new Date().toISOString()
+    updatedAt: touch
+      ? new Date().toISOString()
+      : typeof body.updatedAt === "string" ? body.updatedAt : new Date().toISOString()
+  };
+  return {
+    ...normalized,
+    sessionRevision: createRevision(JSON.stringify(normalized))
   };
 }
 
@@ -1031,9 +1256,10 @@ async function exportReviewSession(project: ProjectSummary, session: ReturnType<
     : "## 整章体检\n\n尚未运行整章体检。";
 
   const annotationSection = sections.length ? `## 划线精修与人工批注\n\n${sections.join("\n\n---\n\n")}` : "## 划线精修与人工批注\n\n暂无批注。";
-  const markdown = `# ${documentName} AI 审校报告\n\n> 生成时间：${new Date().toLocaleString("zh-CN")}\n\n${chapterReviewSection}\n\n---\n\n${annotationSection}\n`;
+  const markdown = `# ${documentName} AI 审校报告\n\n> 生成时间：${new Date().toLocaleString("zh-CN")}\n> 正文 revision：\`${currentRevision}\`\n\n${chapterReviewSection}\n\n---\n\n${annotationSection}\n`;
   await mkdir(reportRoot, { recursive: true });
-  await writeFile(reportFile, markdown, "utf8");
+  await atomicWriteFile(reportFile, markdown);
+  documentCache.delete(reportFile);
   return toProjectPath(projectRoot, reportFile);
 }
 
@@ -1046,7 +1272,7 @@ function renderChapterReviewMarkdown(run: ChapterReviewRun) {
         ? "审阅未完成，不可通过"
         : run.verdict === "pass" ? "通过" : "需修改";
   const context = run.contextManifest.map((item) =>
-    `- ${item.missing ? "缺失" : "已读取"}：\`${item.path}\`（${item.role}，${item.characters} 字符${item.truncated ? "，已按预算截取" : ""}）`
+    `- ${item.missing ? "缺失" : "已读取"}：\`${item.path}\`（${item.role}，${item.characters} 字符${item.truncated ? "，已按预算截取" : ""}${item.revision ? `，revision \`${item.revision}\`` : ""}）`
   ).join("\n") || "- 无上下文记录";
   const findings = run.findings.map((item, index) => [
     `### ${item.severity}-${String(index + 1).padStart(3, "0")} ${item.title}`,
@@ -1089,6 +1315,8 @@ async function handleAiSuggest(req: IncomingMessage, res: ServerResponse) {
   if (typeof body.documentPath !== "string" || typeof body.content !== "string") {
     throw new HttpError(400, "缺少文档路径或草稿内容。");
   }
+  if (body.content.length > 1_900_000) throw new HttpError(413, "送审正文不能超过 1.9 MiB。");
+  if (typeof body.comment === "string" && body.comment.length > 4_000) throw new HttpError(400, "批注问题不能超过 4000 个字符。");
   const fromLine = normalizeLineNumber(body.fromLine);
   const toLine = Math.max(fromLine, normalizeLineNumber(body.toLine));
   const projectRoot = getProjectRoot(project);
@@ -1099,6 +1327,7 @@ async function handleAiSuggest(req: IncomingMessage, res: ServerResponse) {
   const originalText = getLineText(body.content, fromLine, toLine);
   const annotationId = typeof body.annotationId === "string" ? body.annotationId : "unknown";
   const history = normalizeReviewConversation(body.history);
+  const provider = createReviewProvider(engine, projectRoot, settings);
 
   res.statusCode = 200;
   res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
@@ -1128,9 +1357,7 @@ async function handleAiSuggest(req: IncomingMessage, res: ServerResponse) {
   const reviewReply =
     process.env.AI_MOCK_MODE === "true"
       ? createMockReviewReply(originalText)
-      : engine === "codex"
-        ? await requestCodexReviewReply(prompt.combined, projectRoot, settings, originalText)
-        : await requestDeepSeekReviewReply(prompt.system, prompt.user, settings, originalText);
+      : await provider.requestReply({ ...prompt, expectedBefore: originalText });
 
   sendNdjson(
     res,
@@ -1142,7 +1369,7 @@ async function handleAiSuggest(req: IncomingMessage, res: ServerResponse) {
       suggestion: reviewReply.suggestion
         ? {
             ...reviewReply.suggestion,
-            model: engine === "codex" ? "codex-cli" : settings.model,
+            model: engine === "codex" ? "codex-cli" : deepSeekModel,
             usage: null
           }
         : undefined,
@@ -1159,6 +1386,7 @@ async function handleAiReviewChapter(req: IncomingMessage, res: ServerResponse) 
   if (typeof body.documentPath !== "string" || typeof body.content !== "string") {
     throw new HttpError(400, "缺少正文路径或草稿内容。");
   }
+  if (body.content.length > 1_900_000) throw new HttpError(413, "送审正文不能超过 1.9 MiB。");
 
   const projectRoot = getProjectRoot(project);
   resolveProjectFile(projectRoot, body.documentPath);
@@ -1168,6 +1396,7 @@ async function handleAiReviewChapter(req: IncomingMessage, res: ServerResponse) 
 
   const settings = await loadAiSettings();
   const engine: AiEngine = body.engine === "codex" ? "codex" : body.engine === "deepseek" ? "deepseek" : settings.engine;
+  const provider = createReviewProvider(engine, projectRoot, settings);
   const localFindings = runDeterministicChapterChecks(body.documentPath, body.content);
   let context;
   try {
@@ -1193,9 +1422,7 @@ async function handleAiReviewChapter(req: IncomingMessage, res: ServerResponse) 
     const prompt = buildChapterAuditPrompt(context);
     const auditValue = process.env.AI_MOCK_MODE === "true"
       ? { summary: "模拟模式：AI 分层审阅已完成，未额外发现问题。", findings: [] }
-      : engine === "codex"
-        ? await requestCodexJson(prompt.combined, projectRoot, settings, chapterReviewSchemaFile)
-        : await requestDeepSeekJson(prompt.system, prompt.user, settings, 6_000);
+      : await provider.requestJson({ ...prompt, schemaFile: chapterReviewSchemaFile, maxTokens: 6_000 });
     const audit = parseChapterAudit(auditValue, body.content);
     run = {
       ...run,
@@ -1234,9 +1461,7 @@ async function handleAiReviewChapter(req: IncomingMessage, res: ServerResponse) 
           const verificationPrompt = buildVerificationPrompt(verificationCandidates, bundles);
           const verificationValue = process.env.AI_MOCK_MODE === "true"
             ? { decisions: verificationCandidates.map((item) => ({ findingId: item.id, decision: "unverified", reason: "模拟模式不判断历史事实。", sourcePaths: [] })) }
-            : engine === "codex"
-              ? await requestCodexJson(verificationPrompt.combined, projectRoot, settings, verificationSchemaFile)
-              : await requestDeepSeekJson(verificationPrompt.system, verificationPrompt.user, settings, 3_000);
+            : await provider.requestJson({ ...verificationPrompt, schemaFile: verificationSchemaFile, maxTokens: 3_000 });
           run.findings = applyVerification(verificationValue, run.findings, bundles);
         }
       } catch {
@@ -1253,14 +1478,15 @@ async function handleAiReviewChapter(req: IncomingMessage, res: ServerResponse) 
     };
     sendNdjson(res, { type: "result", run, message: run.verdict === "pass" ? "整章体检已通过。" : "整章体检完成，仍有阻塞项待处理。" }, true);
   } catch (error) {
+    const safeError = redactErrorMessage(getErrorMessage(error));
     run = {
       ...run,
       status: "error",
       verdict: computeVerdict(run.findings),
-      error: getErrorMessage(error),
+      error: safeError,
       completedAt: new Date().toISOString()
     };
-    sendNdjson(res, { type: "error", run, message: `AI 审阅未完成：${getErrorMessage(error)}；本地检查结果已保留，草稿未被修改。` }, true);
+    sendNdjson(res, { type: "error", run, message: `AI 审阅未完成：${safeError}；本地检查结果已保留，草稿未被修改。` }, true);
   }
 }
 
@@ -1378,6 +1604,23 @@ function buildReviewPrompt(input: {
   return { system, user, combined: `[SYSTEM RULES]\n${system}\n\n[USER MATERIAL]\n${user}` };
 }
 
+function createReviewProvider(engine: AiEngine, projectRoot: string, settings: AiSettings): ReviewProvider {
+  if (engine === "codex") {
+    return {
+      engine,
+      model: "codex-cli",
+      requestReply: ({ combined, expectedBefore }) => requestCodexReviewReply(combined, projectRoot, settings, expectedBefore),
+      requestJson: ({ combined, schemaFile }) => requestCodexJson(combined, projectRoot, settings, schemaFile)
+    };
+  }
+  return {
+    engine,
+    model: deepSeekModel,
+    requestReply: ({ system, user, expectedBefore }) => requestDeepSeekReviewReply(system, user, settings, expectedBefore),
+    requestJson: ({ system, user, maxTokens }) => requestDeepSeekJson(system, user, settings, maxTokens)
+  };
+}
+
 async function requestDeepSeekReviewReply(system: string, user: string, settings: AiSettings, expectedBefore: string) {
   const value = await requestDeepSeekJson(system, user, settings, 2_048);
   const parsed = parseReviewReply(value, expectedBefore);
@@ -1395,7 +1638,7 @@ async function requestDeepSeekJson(system: string, user: string, settings: AiSet
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      model: settings.model,
+      model: deepSeekModel,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user }
@@ -1530,7 +1773,7 @@ async function getAiStatus(providedSettings?: AiSettings) {
     deepseek: {
       available: deepseekConfigured,
       configured: deepseekConfigured,
-      model: settings.model,
+      model: deepSeekModel,
       error: deepseekConfigured ? null : "未填写 DeepSeek API 密钥"
     },
     codex: {
@@ -1553,8 +1796,8 @@ async function loadAiSettings(): Promise<AiSettings> {
 
 function normalizeAiSettings(value: Partial<AiSettings>): AiSettings {
   return {
-    engine: value.engine === "codex" ? "codex" : "deepseek",
-    model: value.model === "deepseek-v4-pro" ? "deepseek-v4-pro" : "deepseek-v4-flash",
+    engine: value.engine === "deepseek" ? "deepseek" : "codex",
+    model: deepSeekModel,
     reasoningEffort: value.reasoningEffort === "low" || value.reasoningEffort === "high" ? value.reasoningEffort : "medium",
     includeStyleGuide: value.includeStyleGuide !== false,
     includeWritingTaskbook: value.includeWritingTaskbook !== undefined
@@ -1565,7 +1808,7 @@ function normalizeAiSettings(value: Partial<AiSettings>): AiSettings {
 
 async function saveAiSettings(settings: AiSettings) {
   await mkdir(localDir, { recursive: true });
-  await writeFile(aiSettingsFile, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  await atomicWriteJson(aiSettingsFile, settings);
   return settings;
 }
 
@@ -1583,7 +1826,7 @@ async function saveDeepSeekApiKey(value: unknown) {
     throw new HttpError(400, "DeepSeek API 密钥应以 sk- 开头，请检查后重试。");
   }
   const current = existsSync(envFile) ? await readFile(envFile, "utf8") : "# 本机 AI 配置，请勿提交到 Git。\n";
-  await writeFile(envFile, setEnvValue(current, "DEEPSEEK_API_KEY", apiKey), { encoding: "utf8", mode: 0o600 });
+  await atomicWriteFile(envFile, setEnvValue(current, "DEEPSEEK_API_KEY", apiKey), 0o600);
   process.env.DEEPSEEK_API_KEY = apiKey;
 }
 
@@ -1607,24 +1850,6 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "未知错误";
 }
 
-async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
-  let body = "";
-
-  for await (const chunk of req) {
-    body += chunk;
-  }
-
-  if (!body.trim()) {
-    return {} as T;
-  }
-
-  try {
-    return JSON.parse(body) as T;
-  } catch {
-    throw new HttpError(400, "请求体不是合法 JSON。");
-  }
-}
-
 function getRequestUrl(req: IncomingMessage) {
   return new URL(req.url ?? "/", "http://localhost");
 }
@@ -1636,7 +1861,9 @@ function getMountedPathId(req: IncomingMessage) {
 
 function normalizeProjectName(value: unknown) {
   if (typeof value === "string" && value.trim()) {
-    return value.trim();
+    const name = value.trim();
+    if (name.length > 120) throw new HttpError(400, "作品名称不能超过 120 个字符。");
+    return name;
   }
 
   return "未命名小说";
@@ -1664,20 +1891,28 @@ function sendJson(res: ServerResponse, status: number, payload: unknown) {
 }
 
 function sendError(res: ServerResponse, error: unknown) {
-  if (error instanceof HttpError) {
-    sendJson(res, error.statusCode, { error: error.message });
+  if (error instanceof ApiError) {
+    sendJson(res, error.statusCode, { error: redactErrorMessage(error.message) });
     return;
   }
 
-  const message = error instanceof Error ? error.message : "未知错误";
-  sendJson(res, 500, { error: message });
+  console.error("[novel-library-api] 未处理错误", error);
+  sendJson(res, 500, { error: "服务器处理失败，请查看本机终端日志。" });
 }
 
-class HttpError extends Error {
-  constructor(
-    public readonly statusCode: number,
-    message: string
-  ) {
-    super(message);
+class HttpError extends ApiError {}
+
+function redactErrorMessage(message: string) {
+  return message
+    .split(workspaceRoot).join("<工作区>")
+    .split(libraryRoot).join("<小说库>")
+    .replace(/[A-Za-z]:[\\/][^\s"'<>|，。；：）)\]}]+/g, "<本机路径>");
+}
+
+function normalizePositiveInteger(value: unknown, label: string) {
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  if (!Number.isInteger(number) || number <= 0 || number > 999_999) {
+    throw new HttpError(400, `${label} 必须是正整数。`);
   }
+  return number;
 }

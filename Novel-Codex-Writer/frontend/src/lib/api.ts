@@ -12,15 +12,25 @@ import type {
   ProjectsResponse,
   ReviewConversationMessage,
   ReviewSession,
-  SearchResponse
+  SearchResponse,
+  TrashEntry,
+  VersionDiff,
+  VersionsResponse,
+  WorkflowStatus
 } from "../types";
+
+export class ApiRequestError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+  }
+}
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(payload?.error ?? `请求失败：${response.status}`);
+    throw new ApiRequestError(response.status, payload?.error ?? `请求失败：${response.status}`);
   }
 
   return payload as T;
@@ -56,16 +66,17 @@ export function fetchLibrary(projectId: string) {
   return fetchJson<LibraryResponse>(`/api/library?projectId=${encodeURIComponent(projectId)}`);
 }
 
-export function fetchDocument(projectId: string, path: string) {
+export function fetchDocument(projectId: string, path: string, signal?: AbortSignal) {
   return fetchJson<DocumentResponse>(
-    `/api/document?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(path)}`
+    `/api/document?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(path)}`,
+    { signal }
   );
 }
 
 export function saveDocument(projectId: string, path: string, content: string) {
   return fetchJson<DocumentResponse>(
     `/api/document?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(path)}`,
-    jsonRequest("PUT", { content })
+    jsonRequest("PUT", { content, expectedRevision: "" })
   );
 }
 
@@ -103,16 +114,62 @@ export function updateAiSettings(settings: AiSettingsUpdate | Partial<AiSettings
   return fetchJson<AiStatus>("/api/ai/settings", jsonRequest("PATCH", settings));
 }
 
-export function fetchReviewSession(projectId: string, path: string) {
+export function fetchReviewSession(projectId: string, path: string, signal?: AbortSignal) {
   return fetchJson<ReviewSession>(
-    `/api/review-session?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(path)}`
+    `/api/review-session?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(path)}`,
+    { signal }
   );
 }
 
 export function saveReviewSession(session: ReviewSession) {
   return fetchJson<ReviewSession>(
     `/api/review-session?projectId=${encodeURIComponent(session.projectId)}&path=${encodeURIComponent(session.documentPath)}`,
-    jsonRequest("PUT", session)
+    jsonRequest("PUT", { ...session, expectedRevision: session.sessionRevision })
+  );
+}
+
+export function fetchWorkflowStatus(projectId: string, chapter?: number, signal?: AbortSignal) {
+  const chapterQuery = chapter ? `&chapter=${chapter}` : "";
+  return fetchJson<WorkflowStatus>(`/api/workflow/status?projectId=${encodeURIComponent(projectId)}${chapterQuery}`, { signal });
+}
+
+export function runWorkflowAction(projectId: string, input: Record<string, unknown>) {
+  return fetchJson<{ action: string; status: WorkflowStatus; output?: string }>(
+    `/api/workflow/actions?projectId=${encodeURIComponent(projectId)}`,
+    jsonRequest("POST", input)
+  );
+}
+
+export function fetchVersions(projectId: string, path: string) {
+  return fetchJson<VersionsResponse>(`/api/versions?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(path)}`);
+}
+
+export function fetchVersionDiff(projectId: string, path: string, versionId: string) {
+  return fetchJson<VersionDiff>(`/api/versions?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(path)}&versionId=${encodeURIComponent(versionId)}`);
+}
+
+export function restoreVersion(projectId: string, path: string, versionId: string, expectedRevision: string) {
+  return fetchJson<DocumentResponse>(
+    `/api/versions?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(path)}`,
+    jsonRequest("POST", { versionId, expectedRevision })
+  );
+}
+
+export function fetchTrash(projectId: string) {
+  return fetchJson<{ entries: TrashEntry[] }>(`/api/trash?projectId=${encodeURIComponent(projectId)}`);
+}
+
+export function restoreTrash(projectId: string, entryId: string) {
+  return fetchJson<{ restored: true; path: string }>(
+    `/api/trash?projectId=${encodeURIComponent(projectId)}`,
+    jsonRequest("POST", { entryId })
+  );
+}
+
+export function exportBook(projectId: string, type: "markdown" | "zip") {
+  return fetchJson<{ path: string; size?: number; missingChapters?: number[] }>(
+    `/api/export?projectId=${encodeURIComponent(projectId)}&type=${type}`,
+    jsonRequest("POST")
   );
 }
 
@@ -135,9 +192,10 @@ export async function streamAiSuggestion(
     annotationId: string;
     history: ReviewConversationMessage[];
   },
-  onEvent: (event: AiStreamEvent) => void
+  onEvent: (event: AiStreamEvent) => void,
+  signal?: AbortSignal
 ) {
-  const response = await fetch("/api/ai/suggest", jsonRequest("POST", input));
+  const response = await fetch("/api/ai/suggest", { ...jsonRequest("POST", input), signal });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     throw new Error(payload?.error ?? `AI 请求失败：${response.status}`);
@@ -167,9 +225,10 @@ export async function streamChapterReview(
     content: string;
     engine: AiEngine;
   },
-  onEvent: (event: ChapterReviewStreamEvent) => void
+  onEvent: (event: ChapterReviewStreamEvent) => void,
+  signal?: AbortSignal
 ) {
-  const response = await fetch("/api/ai/review-chapter", jsonRequest("POST", input));
+  const response = await fetch("/api/ai/review-chapter", { ...jsonRequest("POST", input), signal });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     throw new Error(payload?.error ?? `整章体检请求失败：${response.status}`);

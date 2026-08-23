@@ -52,6 +52,7 @@
 - current 文件只保存当前仍会影响后续创作的信息。
 - current 不得无限追加；关闭、过期或矛盾的信息要通过结构化 `memory_patch` 迁移到档案库。
 - 更新 current 时必须先运行 `update_memory.py --dry-run`，校验通过后再正式执行。
+- 所有 dry-run 和查询必须零写入；未完成事务默认只报告，只有显式 `memory_doctor.py --recover` 才能恢复，hash 冲突时停止。
 - Markdown 是事实源；`记忆库/index/memory_index.json` 只是可删除、可重建的检索索引。
 
 ## 历史保存位置
@@ -73,6 +74,7 @@
 4. 生成 `memory_patch`，说明本章对人物、关系、伏笔、设定、时间线、不可违背事实的影响。
 5. 先 dry-run，再使用 `update_memory.py` 根据 `memory_patch` 自动更新 current、档案和索引。
 6. 检查章节字数是否在 2000-2500 字之间；不达标时必须先扩写或压缩正文，再生成最终审查和提交记录。
+7. 审查、提交、schema v2 `chapter_result` patch 与最终化 manifest 必须绑定同一正文 SHA-256；正文变化后旧产物一律 stale。
 
 ## 压缩归档规则
 
@@ -84,6 +86,7 @@
 ## 网页端删除规则
 
 - 网页端删除小说或 Markdown 文件时，默认移动到 `小说项目/.trash/`。
+- 正文实际保存变更前先保留到作品内 `.history/`；恢复需要校验当前 revision，同名回收站目标不得覆盖。
 - 不要手动清空 `.trash/`，除非用户明确要求永久删除。
 - 不要把 `.trash/` 当作当前创作资料读取。
 

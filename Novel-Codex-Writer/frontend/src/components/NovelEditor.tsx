@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { markdown } from "@codemirror/lang-markdown";
-import { Compartment, EditorState, StateEffect, StateField } from "@codemirror/state";
+import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { Compartment, EditorState, StateEffect, StateField, Transaction } from "@codemirror/state";
 import { Decoration, EditorView, keymap, lineNumbers, type DecorationSet } from "@codemirror/view";
 import type { WorkspaceMode } from "../types";
 
@@ -70,10 +71,11 @@ export function NovelEditor({
           }
         }),
         markdown(),
+        history(),
         annotationMarks,
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({ spellcheck: "false", "aria-label": "小说正文编辑器" }),
-        keymap.of([]),
+        keymap.of([...defaultKeymap, ...historyKeymap]),
         modeCompartment.of(modeExtensions(mode)),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) onChangeRef.current(update.state.doc.toString());
@@ -122,7 +124,10 @@ export function NovelEditor({
     if (!view) return;
     const current = view.state.doc.toString();
     if (current !== value) {
-      view.dispatch({ changes: { from: 0, to: current.length, insert: value } });
+      view.dispatch({
+        changes: { from: 0, to: current.length, insert: value },
+        annotations: Transaction.addToHistory.of(false)
+      });
     }
   }, [value]);
 

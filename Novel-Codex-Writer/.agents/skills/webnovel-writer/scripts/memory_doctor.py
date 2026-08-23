@@ -18,6 +18,7 @@ from memory_common import (
     atomic_write_text,
     blocked_taskbook_from_legacy,
     diagnostics,
+    inspect_transactions,
     normalize_chapter,
     read_text,
     rebuild_index,
@@ -35,6 +36,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--project-root", default=None, help="小说目录；默认读取 activeProjectId。")
     parser.add_argument("--migrate-legacy", action="store_true", help="为现有 Markdown 条目补充元数据并迁移旧上下文包。")
     parser.add_argument("--rebuild-index", action="store_true", help="从 Markdown 事实源重建 memory_index.json。")
+    parser.add_argument("--recover", action="store_true", help="显式恢复未完成事务；默认只报告，不修改。")
+    parser.add_argument(
+        "--force-legacy-recovery",
+        action="store_true",
+        help="确认旧事务没有外部修改后，允许恢复缺少 hash 的旧事务。",
+    )
     parser.add_argument("--dry-run", action="store_true", help="只显示会做什么，不修改文件。")
     parser.add_argument("--json", action="store_true", help="以 JSON 输出诊断结果。")
     return parser.parse_args()
@@ -113,7 +120,14 @@ def main() -> int:
         library_root = resolve_library_root(args.library_root)
         project_root = resolve_project_root(library_root, args.project_root)
         chapter = normalize_chapter(args.chapter)[0] if args.chapter else None
-        recovered = recover_transactions(project_root)
+        pending_before = inspect_transactions(project_root)
+        recovered: list[str] = []
+        if args.force_legacy_recovery and not args.recover:
+            raise MemorySystemError("--force-legacy-recovery 必须与 --recover 一起使用。")
+        if args.recover and not args.dry_run:
+            recovered = recover_transactions(project_root, force_legacy=args.force_legacy_recovery)
+        elif pending_before and (args.migrate_legacy or args.rebuild_index) and not args.dry_run:
+            raise MemorySystemError("存在未完成事务。请先运行 memory_doctor.py --recover，再执行写操作。")
         migration_summary = None
         trash_target = None
         if args.migrate_legacy:
@@ -137,6 +151,8 @@ def main() -> int:
     result = {
         "project_root": str(project_root),
         "dry_run": args.dry_run,
+        "pending_transactions": pending_before,
+        "recovery_planned": bool(args.recover and args.dry_run and pending_before),
         "recovered_transactions": recovered,
         "migration": migration_summary,
         "trash_target": str(trash_target) if trash_target else None,
@@ -149,6 +165,8 @@ def main() -> int:
         print(f"小说目录：{project_root}")
         if recovered:
             print("已恢复未完成事务：" + "、".join(recovered))
+        elif args.recover and args.dry_run and pending_before:
+            print("dry-run：以下事务将在显式恢复时处理：" + "、".join(item["id"] for item in pending_before))
         if migration_summary:
             verb = "预计迁移" if args.dry_run else "已迁移"
             print(f"{verb} {migration_summary['records']} 条旧记忆，涉及 {len(migration_summary['files'])} 个文件。")
@@ -162,7 +180,7 @@ def main() -> int:
             print("诊断结果：")
             for finding in findings:
                 print(f"- [{finding['severity']}] {finding['code']}：{finding['message']}")
-    return 2 if any(item["severity"] == "error" for item in findings) else 0
+    return 2 if any(item["severity"] in {"error", "blocked"} for item in findings) else 0
 
 
 if __name__ == "__main__":

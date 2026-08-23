@@ -10,10 +10,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_checker():
-    matches = [path for path in ROOT.rglob("check_chapter.py") if ".git" not in path.parts]
+    excluded_parts = {".git", "tmp", "node_modules", "dist"}
+    matches = [
+        path
+        for path in ROOT.rglob("check_chapter.py")
+        if not excluded_parts.intersection(path.parts)
+    ]
     if len(matches) != 1:
         raise AssertionError(f"期望找到一个 check_chapter.py，实际找到：{matches}")
     path = matches[0]
+    sys.path.insert(0, str(path.parent))
     spec = importlib.util.spec_from_file_location("novel_codex_check_chapter", path)
     if spec is None or spec.loader is None:
         raise AssertionError(f"无法加载章节检查器：{path}")

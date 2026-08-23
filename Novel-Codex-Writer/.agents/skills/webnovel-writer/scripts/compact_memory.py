@@ -21,7 +21,7 @@ from memory_common import (
     load_patch_history,
     read_text,
     rebuild_index,
-    recover_transactions,
+    select_chapter_result_patches,
     remove_record_blocks,
     render_record,
     resolve_library_root,
@@ -161,7 +161,6 @@ def main() -> int:
         start, end = parse_range(args.range)
         library_root = resolve_library_root(args.library_root)
         project_root = resolve_project_root(library_root, args.project_root)
-        recovered = recover_transactions(project_root)
         arcs = discover_arc_outlines(project_root)
         arc = exact_arc(arcs, start, end)
         findings = diagnostics(project_root, end)
@@ -170,10 +169,10 @@ def main() -> int:
             print("本次按非篇末诊断处理：不会归档、不会生成 snapshot。")
             for finding in findings:
                 print(f"- [{finding['severity']}] {finding['code']}：{finding['message']}")
-            return 2 if any(item["severity"] == "error" for item in findings) else 0
+            return 2 if any(item["severity"] in {"error", "blocked"} for item in findings) else 0
 
         records = load_all_records(project_root)
-        patches = load_patch_history(project_root)
+        patches = select_chapter_result_patches(load_patch_history(project_root))
         if any(item["severity"] == "blocked" for item in findings):
             raise MemorySystemError("当前存在 workflow blocker，不能生成篇末摘要。请先解决并关闭阻断记录。")
         completed_chapters = {
@@ -201,15 +200,13 @@ def main() -> int:
 
     print(f"小说目录：{project_root}")
     print(f"篇纲：{arc.path.name}（第{start:03d}-{end:03d}章）")
-    if recovered:
-        print("已恢复未完成事务：" + "、".join(recovered))
     print("执行模式：" + ("dry-run，只诊断不写入" if args.dry_run else "已完成篇末压缩"))
     for item in report:
         print(f"- {item}")
     print(f"- 篇末摘要：{snapshot_path.relative_to(project_root).as_posix()}")
     for finding in findings:
         print(f"- [{finding['severity']}] {finding['code']}：{finding['message']}")
-    return 2 if any(item["severity"] == "error" for item in findings) else 0
+    return 2 if any(item["severity"] in {"error", "blocked"} for item in findings) else 0
 
 
 if __name__ == "__main__":

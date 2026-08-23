@@ -11,5 +11,16 @@ export default defineConfig({
   preview: {
     host: "127.0.0.1",
     port: 4173
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("@codemirror/lang-markdown") || id.includes("@lezer/markdown")) return "codemirror-markdown";
+          if (id.includes("@codemirror") || id.includes("@lezer")) return "codemirror-core";
+          return undefined;
+        }
+      }
+    }
   }
 });

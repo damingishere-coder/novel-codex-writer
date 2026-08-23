@@ -13,7 +13,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def find_single(filename: str) -> Path:
-    matches = [path for path in ROOT.rglob(filename) if ".git" not in path.parts]
+    excluded_parts = {".git", "tmp", "node_modules", "dist"}
+    matches = [
+        path
+        for path in ROOT.rglob(filename)
+        if not excluded_parts.intersection(path.parts)
+    ]
     if len(matches) != 1:
         raise AssertionError(f"期望找到一个 {filename}，实际找到：{matches}")
     return matches[0]
@@ -145,18 +150,37 @@ class MemorySystemFunctionalTests(unittest.TestCase):
 
     def test_update_memory_is_idempotent_and_rejects_changed_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            project_root = Path(temp_dir) / "demo"
+            library_root = Path(temp_dir) / "小说项目"
+            project_root = library_root / "作品" / "demo"
             current_dir = project_root / "记忆库" / "current"
             current_dir.mkdir(parents=True)
             (project_root / "章节提交").mkdir(parents=True)
-            patch_path = Path(temp_dir) / "patch.json"
+            (library_root / "projects.json").write_text(
+                json.dumps(
+                    {"activeProjectId": "demo", "projects": [{"id": "demo"}]},
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            patch_path = project_root / "章节提交" / "patch.json"
+            patch = valid_patch()
+            patch.update(
+                {
+                    "schema_version": 2,
+                    "kind": "migration",
+                    "chapter_revision": None,
+                    "source_revisions": {},
+                }
+            )
             patch_path.write_text(
-                json.dumps(valid_patch(), ensure_ascii=False, indent=2), encoding="utf-8"
+                json.dumps(patch, ensure_ascii=False, indent=2), encoding="utf-8"
             )
 
             command = [
                 sys.executable,
                 str(UPDATE_MEMORY_PATH),
+                "--library-root",
+                str(library_root),
                 "--current-dir",
                 str(current_dir),
                 "--patch",
@@ -170,7 +194,7 @@ class MemorySystemFunctionalTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, msg=second.stdout + second.stderr)
             self.assertEqual(first_snapshot, snapshot_tree(project_root))
 
-            changed = valid_patch()
+            changed = dict(patch)
             changed["summary"] = "同一 patch_id 被替换成了不同内容。"
             patch_path.write_text(json.dumps(changed, ensure_ascii=False, indent=2), encoding="utf-8")
             conflict = subprocess.run(command, capture_output=True, text=True, check=False)

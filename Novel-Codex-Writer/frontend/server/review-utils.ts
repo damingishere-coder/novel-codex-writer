@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createSharedLineAnchor } from "../shared/review-anchor";
 
 export const AI_SUGGESTION_SCHEMA = {
   type: "object",
@@ -38,12 +39,7 @@ export function createRevision(content: string) {
 }
 
 export function createLineAnchor(content: string, fromLine: number, toLine: number) {
-  const lines = content.split(/\r?\n/);
-  const start = Math.max(1, Math.min(fromLine, lines.length));
-  const end = Math.max(start, Math.min(toLine, lines.length));
-  return createHash("sha256")
-    .update(`${start}:${end}\n${lines.slice(start - 1, end).join("\n")}`, "utf8")
-    .digest("hex");
+  return createSharedLineAnchor(content, fromLine, toLine);
 }
 
 export function getLineText(content: string, fromLine: number, toLine: number) {
@@ -93,7 +89,7 @@ export function parseSuggestion(value: unknown, expectedBefore?: string) {
   }
   if (expectedBefore !== undefined && before !== expectedBefore) return null;
   if (suggestion.decision !== "keep" && suggestion.decision !== "change") return null;
-  const decision = suggestion.decision;
+  const decision = suggestion.decision as "keep" | "change";
   if (decision === "keep" && after !== before) return null;
   if (decision === "change" && after === before) return null;
   if (!["S1", "S2", "S3", "S4"].includes(String(suggestion.severity))) return null;

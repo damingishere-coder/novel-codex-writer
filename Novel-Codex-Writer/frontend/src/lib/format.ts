@@ -1,4 +1,5 @@
 import type { DocumentEntry } from "../types";
+import { createSharedLineAnchor } from "../../shared/review-anchor";
 
 export function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -80,11 +81,5 @@ export function replaceLineRange(content: string, fromLine: number, toLine: numb
 }
 
 export function createTextAnchor(content: string, fromLine: number, toLine: number) {
-  const value = `${fromLine}:${toLine}\n${getLineText(content, fromLine, toLine)}`;
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
+  return createSharedLineAnchor(content, fromLine, toLine);
 }

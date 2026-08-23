@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,10 +15,13 @@ from memory_common import (
     TASKBOOK_NAME,
     MemoryRecord,
     MemorySystemError,
-    atomic_write_text,
+    apply_transaction,
+    assert_project_path,
     ensure_index,
     find_blueprint,
+    inspect_transactions,
     load_indexed_records,
+    memory_source_files,
     normalize_chapter,
     parse_chapter_number,
     rank_index_records,
@@ -25,6 +29,8 @@ from memory_common import (
     resolve_library_root,
     resolve_project_root,
     select_arc_outline,
+    sha256_file,
+    sha256_text,
 )
 
 
@@ -47,6 +53,45 @@ SECTION_ORDER = (
 )
 
 PREVIOUS_CHAPTER_LIMIT = 5
+
+
+def build_taskbook_metadata(
+    project_root: Path,
+    chapter: int,
+    source_paths: list[Path],
+    status: str,
+    content: str,
+) -> dict[str, object]:
+    sources = []
+    for path in sorted({path.resolve() for path in source_paths if path.is_file()}):
+        checked = assert_project_path(project_root, path, "任务书来源")
+        sources.append(
+            {
+                "path": checked.relative_to(project_root).as_posix(),
+                "revision": sha256_file(checked),
+            }
+        )
+    metadata = {
+        "schema_version": 1,
+        "chapter": chapter,
+        "status": status,
+        "taskbook_revision": sha256_text(content),
+        "sources": sources,
+    }
+    return metadata
+
+
+def write_taskbook(project_root: Path, output: Path, content: str, metadata: dict[str, object]) -> Path:
+    metadata_path = output.with_name(output.name + ".meta.json")
+    assert_project_path(project_root, metadata_path, "任务书 metadata 输出")
+    apply_transaction(
+        project_root,
+        {
+            output: content,
+            metadata_path: json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
+        },
+    )
+    return metadata_path
 
 
 def parse_args() -> argparse.Namespace:
@@ -445,9 +490,16 @@ def main() -> int:
         chapter, _ = normalize_chapter(args.chapter)
         library_root = resolve_library_root(args.library_root)
         project_root = resolve_project_root(library_root, args.project_root)
+        if inspect_transactions(project_root):
+            raise MemorySystemError("存在未完成事务。请先运行 memory_doctor.py 诊断，并显式使用 --recover。")
         current_dir = project_root / "记忆库" / "current"
         output = Path(args.output) if args.output else current_dir / TASKBOOK_NAME
         output = output.resolve() if output.is_absolute() else (Path.cwd() / output).resolve()
+        output = assert_project_path(project_root, output, "任务书输出")
+        for required_name in ("总纲.md", "章节规划.md"):
+            required_path = project_root / "大纲" / required_name
+            if not required_path.is_file():
+                raise MemorySystemError(f"缺少必需大纲文件：{required_path.relative_to(project_root).as_posix()}")
         legacy_context = current_dir / LEGACY_CONTEXT_NAME
         if legacy_context.exists():
             raise MemorySystemError(
@@ -465,18 +517,23 @@ def main() -> int:
         if blocker_items:
             blockers = load_indexed_records(project_root, blocker_items)
             taskbook = blocker_taskbook(chapter, blockers, budget)
-            output.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_text(output, taskbook)
+            taskbook_metadata = build_taskbook_metadata(
+                project_root,
+                chapter,
+                [record.path for record in blockers],
+                "blocked",
+                taskbook,
+            )
+            write_taskbook(project_root, output, taskbook, taskbook_metadata)
             print(f"已生成阻断型写作任务书：{output}")
             print("没有读取旧章节细纲，也没有生成正文写作材料。")
-            return 0
+            return 2
 
         blueprint_path = find_blueprint(project_root, chapter)
         if blueprint_path is None:
             raise MemorySystemError(
                 f"找不到第{chapter:03d}章细纲。请先创建并确认 大纲/细纲_第{chapter:03d}章.md。"
             )
-        index = ensure_index(project_root)
         previous_summary_required(project_root, index, chapter)
         blueprint_text = read_text(blueprint_path)
         arc_chapter_text = chapter_section(read_text(arc.path), chapter)
@@ -506,8 +563,22 @@ def main() -> int:
             blueprint_path.name,
             extra_omitted_ids,
         )
-        output.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(output, taskbook)
+        taskbook_sources = [
+            project_root / "大纲" / "总纲.md",
+            project_root / "大纲" / "章节规划.md",
+            arc.path,
+            blueprint_path,
+            *[path for _, path in previous_chapter_paths(project_root, chapter)],
+            *memory_source_files(project_root),
+        ]
+        taskbook_metadata = build_taskbook_metadata(
+            project_root,
+            chapter,
+            taskbook_sources,
+            "ready",
+            taskbook,
+        )
+        write_taskbook(project_root, output, taskbook, taskbook_metadata)
     except MemorySystemError as exc:
         print(f"错误：{exc}")
         return 2

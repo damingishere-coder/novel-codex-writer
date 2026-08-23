@@ -39,7 +39,8 @@ def main() -> int:
             raise MemorySystemError("--limit 必须大于 0。")
         library_root = resolve_library_root(args.library_root)
         project_root = resolve_project_root(library_root, args.project_root)
-        index = ensure_index(project_root)
+        # 查询必须是纯只读；索引缺失或过期时只在内存中重建。
+        index = ensure_index(project_root, persist=False)
         selected_items, omitted_items = rank_index_records(
             index,
             chapter,
@@ -96,4 +97,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -17,6 +17,9 @@ description: 持续创作和维护多部长篇网络小说；用于选择活动�
 - 正文保持 2000—2500 字；用户没有明确要求写第几章时不要生成正文。
 - Markdown 记忆是事实源，`memory_index.json` 只是可删除重建的索引。
 - 不读取旧版正文、旧版设定备份或 `.trash` 作为当前事实。
+- 所有显式路径必须位于 `projects.json` 已登记的当前作品目录内；拒绝未登记目录和路径越界。
+- `--dry-run` 与查询必须零写入；未完成事务只报告，只有 `memory_doctor.py --recover` 才允许恢复。
+- 章节审查、提交、memory patch 与最终化 manifest 必须绑定同一正文 SHA-256；任何来源变化都视为 stale。
 
 ## 按需参考
 
@@ -25,10 +28,13 @@ description: 持续创作和维护多部长篇网络小说；用于选择活动�
 - 生成章节提交时读取 `references/章节提交规范.md`。
 - 把控文风时读取 `references/写作风格规则.md`。
 - 审查章节时读取 `references/章节审查规范.md`。
+- 接入已有正文时读取 `references/旧稿接入.md`。
+- 完成章节时读取 `references/章节最终化.md`。
+- 总结用户改稿习惯时读取 `references/作者改稿偏好.md`；偏好只能先作为候选，用户确认后才能写入作品。
 
 ## 写章前
 
-1. 运行 `scripts/memory_doctor.py --chapter XXX`，先处理 error；存在 workflow blocker 时停止写作。
+1. 运行 `scripts/memory_doctor.py --chapter XXX`，先处理 error、blocked 和 stale；存在 workflow blocker 时停止写作。
 2. 确认本章细纲已经按当前篇纲完成并通过用户要求的检查。
 3. 运行 `scripts/build_context.py --chapter XXX --budget-chars 1500`。
 4. 读取生成的 `本章写作任务书.md`。
@@ -41,15 +47,15 @@ description: 持续创作和维护多部长篇网络小说；用于选择活动�
 
 1. 按任务书写正文，不把“细纲、伏笔、读者、本章”等工程词写进正文。
 2. 运行 `scripts/check_chapter.py` 检查章节号、字数和确定性问题。
-3. 按 `references/章节审查规范.md` 输出审查报告；先修复 S1、S2，再保存最终正文。
+3. 按 `references/章节审查规范.md` 输出带正文 revision 的审查报告；S1、S2 都会返回失败码，必须先修复再保存最终正文。
 4. 将正文保存为 `正文/第XXX章_标题.md`，审查报告保存到 `审查报告/`。
 
 ## 写章后
 
 1. 在 `章节提交/` 保存章节提交记录。
-2. 按 `references/记忆补丁格式.md` 生成结构化 memory_patch；只写会影响后续的变化。
+2. 按 `references/记忆补丁格式.md` 生成 schema v2 memory_patch；明确 `kind`，并绑定正文与来源 revision。
 3. 先运行 `scripts/update_memory.py --patch <补丁文件> --dry-run`。
-4. dry-run 无错误后，运行同一命令但去掉 `--dry-run`。脚本负责合并 current、归档失效条目、记录补丁和重建索引。
+4. dry-run 无错误后，运行同一命令但去掉 `--dry-run`。`chapter_result` 只有在细纲、任务书、正文、审查与提交 revision 一致时才生成最终化 manifest。
 5. 重复执行相同 `patch_id` 必须得到幂等跳过；不要手工复制补丁内容到 current。
 
 ## 查询和篇末压缩
@@ -68,3 +74,11 @@ scripts/memory_doctor.py --chapter XXX --migrate-legacy --rebuild-index --dry-ru
 ```
 
 确认范围后去掉 `--dry-run`。迁移只补充单行元数据，不改写原有事实；旧 `本章上下文包.md` 移入 `.trash` 并改用 `本章写作任务书.md`。
+
+发现未完成事务时先只读诊断；确认目标没有外部修改后，显式运行：
+
+```text
+scripts/memory_doctor.py --recover
+```
+
+同章存在多个旧 patch 时不得猜测。必须在网页“创作进度”中由作者确认唯一 `chapter_result`，其余分类为 `outline_baseline` 或 `migration`；旧文件不重写、不删除。

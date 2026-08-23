@@ -10,6 +10,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from memory_common import (
+    MemorySystemError,
+    assert_project_path,
+    atomic_write_text,
+    resolve_library_root as registered_library_root,
+    resolve_project_path,
+    resolve_project_root as registered_project_root,
+    sha256_file,
+)
+
 
 WORD_COUNT_MIN = 2000
 WORD_COUNT_MAX = 2500
@@ -72,7 +82,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="严格模式：存在 S1 或 S2 时返回失败码。默认只有 S1 返回失败码。",
+        help="兼容参数；现在 S1 或 S2 都会返回失败码。",
     )
     return parser.parse_args()
 
@@ -176,7 +186,8 @@ def extract_chapter_number(path: Path, content: str) -> int | None:
 def resolve_chapter_file(project_root: Path, expected_chapter: int | None, explicit_file: str | None) -> Path:
     if explicit_file:
         path = Path(explicit_file)
-        return path.resolve() if path.is_absolute() else (Path.cwd() / path).resolve()
+        resolved = path.resolve() if path.is_absolute() else (Path.cwd() / path).resolve()
+        return assert_project_path(project_root, resolved, "正文输入")
 
     if expected_chapter is None:
         raise SystemExit("请提供章节文件，或使用 --chapter 指定要从当前小说正文目录中查找的章节。")
@@ -327,6 +338,7 @@ def render_report(path: Path, content: str, word_count: int, findings: list[Find
         "",
         f"- 生成时间：{generated_at}",
         f"- 检查文件：`{path}`",
+        f"- 正文 revision：`{sha256_file(path)}`",
         f"- 字数：{word_count}",
         f"- 结果：{status}",
         "",
@@ -357,8 +369,8 @@ def render_report(path: Path, content: str, word_count: int, findings: list[Find
 def main() -> int:
     args = parse_args()
     expected_chapter = normalize_chapter(args.chapter)
-    library_root = resolve_library_root(args.library_root)
-    project_root = None if args.chapter_file else resolve_project_root(library_root, args.project_root)
+    library_root = registered_library_root(args.library_root)
+    project_root = registered_project_root(library_root, args.project_root)
     chapter_file = resolve_chapter_file(project_root, expected_chapter, args.chapter_file)
     content = read_text(chapter_file)
 
@@ -375,16 +387,15 @@ def main() -> int:
 
     report = render_report(chapter_file, content, word_count, findings)
     if args.output:
-        output = Path(args.output)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(report, encoding="utf-8")
+        output = resolve_project_path(project_root, args.output, "审查报告输出")
+        atomic_write_text(output, report)
         print(f"已生成章节检查报告：{output.resolve()}")
     else:
         print(report)
 
     has_s1 = any(finding.severity == "S1" for finding in findings)
     has_s2 = any(finding.severity == "S2" for finding in findings)
-    if has_s1 or (args.strict and has_s2):
+    if has_s1 or has_s2:
         return 1
     return 0
 

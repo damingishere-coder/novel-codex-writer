@@ -68,9 +68,9 @@ const categoryLabels: Record<ReviewFinding["category"], string> = {
 };
 
 export function ReviewPanel(props: ReviewPanelProps) {
-  const [engine, setEngine] = useState<AiEngine>(props.aiStatus?.settings.engine ?? "deepseek");
+  const [engine, setEngine] = useState<AiEngine>(props.aiStatus?.settings.engine ?? "codex");
   const [severity, setSeverity] = useState<"all" | ReviewSeverity>("all");
-  useEffect(() => setEngine(props.aiStatus?.settings.engine ?? "deepseek"), [props.aiStatus?.settings.engine]);
+  useEffect(() => setEngine(props.aiStatus?.settings.engine ?? "codex"), [props.aiStatus?.settings.engine]);
 
   const pending = props.annotations.filter((item) => ["draft", "pending", "ready", "error", "stale"].includes(item.status)).length;
   const findings = props.chapterReview?.findings ?? [];
@@ -90,7 +90,7 @@ export function ReviewPanel(props: ReviewPanelProps) {
       {props.isChapter ? (
         <div className="chapter-review-controls">
           <select value={engine} onChange={(event) => setEngine(event.target.value as AiEngine)} aria-label="整章体检引擎">
-            <option value="deepseek">DeepSeek V4</option>
+            <option value="deepseek">DeepSeek V4-Flash</option>
             <option value="codex">Codex</option>
           </select>
           <button className="primary-button" onClick={() => props.onRunChapterReview(engine)} disabled={props.reviewBusy}>
@@ -124,7 +124,7 @@ export function ReviewPanel(props: ReviewPanelProps) {
         {props.chapterReview?.contextManifest.length ? (
           <details className="context-manifest">
             <summary>本次送审资料（{props.chapterReview.contextManifest.length}）</summary>
-            <ul>{props.chapterReview.contextManifest.map((item, index) => <li key={`${item.path}-${index}`} className={item.missing ? "missing" : ""}><strong>{item.role}</strong><span>{item.path}</span><small>{item.missing ? "缺失" : `${item.characters} 字符${item.truncated ? " · 已截取" : ""}`}</small></li>)}</ul>
+            <ul>{props.chapterReview.contextManifest.map((item, index) => <li key={`${item.path}-${index}`} className={item.missing ? "missing" : ""}><strong>{item.role}</strong><span>{item.path}</span><small>{item.missing ? "缺失" : `${item.characters} 字符${item.truncated ? " · 已截取" : ""}${item.revision ? ` · ${item.revision.slice(0, 12)}` : ""}`}</small></li>)}</ul>
           </details>
         ) : null}
 
@@ -231,7 +231,7 @@ function AnnotationCard({ annotation, selected, aiStatus, onSelect, onUpdate, on
             <div key={message.id} className={cn("conversation-message", `is-${message.role}`)}>
               <div className="conversation-avatar">{message.role === "user" ? <UserRound size={13} /> : <Bot size={14} />}</div>
               <div className="conversation-body">
-                <div className="conversation-meta"><strong>{message.role === "user" ? "你" : "AI 审阅"}</strong>{message.engine ? <span>{message.engine === "deepseek" ? "DeepSeek V4" : "Codex"}</span> : null}</div>
+                <div className="conversation-meta"><strong>{message.role === "user" ? "你" : "AI 审阅"}</strong>{message.engine ? <span>{message.engine === "deepseek" ? "DeepSeek V4-Flash" : "Codex"}</span> : null}</div>
                 <p className="conversation-text">{message.content}</p>
                 {message.suggestion ? (
                   <div className={cn("suggestion-preview", message.suggestion.decision === "keep" && "is-keep")}>
@@ -273,7 +273,7 @@ function AnnotationCard({ annotation, selected, aiStatus, onSelect, onUpdate, on
             rows={3}
           />
           <div className="composer-footer">
-            <label className="engine-select"><span>引擎</span><select value={annotation.engine} onChange={(event) => onUpdate({ engine: event.target.value as AiEngine })} disabled={isRunning}><option value="deepseek">DeepSeek V4 · 快速</option><option value="codex">Codex · 深度</option></select></label>
+            <label className="engine-select"><span>引擎</span><select value={annotation.engine} onChange={(event) => onUpdate({ engine: event.target.value as AiEngine })} disabled={isRunning}><option value="deepseek">DeepSeek V4-Flash · 快速</option><option value="codex">Codex · 深度</option></select></label>
             <span className="composer-shortcut">Ctrl Enter</span>
             <button className="primary-button" onClick={onCallAi} disabled={isRunning || !annotation.comment.trim()}>{isRunning ? <LoaderCircle size={15} className="animate-spin" /> : <Send size={15} />}{isRunning ? "回答中" : hasConversation ? "发送追问" : "调用 AI"}</button>
             {!engineReady ? <small className="engine-warning">当前引擎尚未连接；调用后会显示具体原因</small> : null}

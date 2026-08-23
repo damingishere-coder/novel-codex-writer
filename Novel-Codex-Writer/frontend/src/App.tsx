@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -24,9 +24,9 @@ import {
   X
 } from "lucide-react";
 import { LibrarySidebar } from "./components/LibrarySidebar";
-import { MarkdownView } from "./components/MarkdownView";
-import { NovelEditor, type AnnotationRevealRequest } from "./components/NovelEditor";
-import { ReviewPanel } from "./components/ReviewPanel";
+import { RecoveryPanel } from "./components/RecoveryPanel";
+import { WorkflowPanel } from "./components/WorkflowPanel";
+import type { AnnotationRevealRequest } from "./components/NovelEditor";
 import {
   createProject,
   deleteDocument,
@@ -37,10 +37,12 @@ import {
   fetchLibrary,
   fetchProjects,
   fetchReviewSession,
+  fetchWorkflowStatus,
   fetchSearch,
   saveDocument,
   saveDocumentRevision,
   saveReviewSession,
+  runWorkflowAction,
   streamAiSuggestion,
   streamChapterReview,
   updateAiSettings,
@@ -91,7 +93,12 @@ import type {
   ReviewSession,
   SearchResult,
   WorkspaceMode
+  ,WorkflowStatus
 } from "./types";
+
+const MarkdownView = lazy(() => import("./components/MarkdownView").then((module) => ({ default: module.MarkdownView })));
+const NovelEditor = lazy(() => import("./components/NovelEditor").then((module) => ({ default: module.NovelEditor })));
+const ReviewPanel = lazy(() => import("./components/ReviewPanel").then((module) => ({ default: module.ReviewPanel })));
 
 const initialOpenGroups: GroupId[] = ["chapters", "current"];
 const LEFT_PANE_STORAGE_KEY = "novel-left-pane-width";
@@ -117,6 +124,12 @@ export function App() {
   const [searchError, setSearchError] = useState("");
   const [leftCollapsed, setLeftCollapsed] = useState(() => localStorage.getItem("novel-left-collapsed") === "true");
   const [rightVisible, setRightVisible] = useState(true);
+  const [rightTab, setRightTab] = useState<"review" | "workflow" | "recovery">("review");
+  const [workflowStatus, setWorkflowStatus] = useState<WorkflowStatus>();
+  const [workflowLoading, setWorkflowLoading] = useState(false);
+  const [workflowBusy, setWorkflowBusy] = useState(false);
+  const [documentHistory, setDocumentHistory] = useState<string[]>([]);
+  const [documentHistoryIndex, setDocumentHistoryIndex] = useState(-1);
   const [paneWidths, setPaneWidths] = useState<PaneWidths>(() => ({
     left: readStoredPaneWidth(localStorage.getItem(LEFT_PANE_STORAGE_KEY), "left"),
     right: readStoredPaneWidth(localStorage.getItem(REVIEW_PANE_STORAGE_KEY), "right")
@@ -144,9 +157,16 @@ export function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const annotationRevealRequestIdRef = useRef(0);
   const workbenchRef = useRef<HTMLElement>(null);
+  const aiRequestsRef = useRef(new Set<AbortController>());
+  const activeDocumentKeyRef = useRef("");
+  const sessionRef = useRef<ReviewSession>();
+  const sessionSaveInFlightRef = useRef(false);
+  const sessionSavePendingRef = useRef(false);
 
   const activeProject = projects.find((project) => project.id === activeProjectId);
   const selectedEntry = library?.groups.flatMap((group) => group.entries).find((entry) => entry.path === selectedPath);
+  activeDocumentKeyRef.current = `${activeProjectId}:${selectedPath}`;
+  sessionRef.current = session;
   const wordCount = useMemo(() => countReadableWords(draftContent), [draftContent]);
   const dirty = Boolean(document && normalizeLineEndings(draftContent) !== normalizeLineEndings(document.content));
   const latestChapterReview = session?.chapterReviewRuns[0];
@@ -222,20 +242,23 @@ export function App() {
   async function initialize() {
     try {
       setLoading(true);
-      const [projectPayload, status] = await Promise.all([fetchProjects(), fetchAiStatus()]);
+      const projectPayload = await fetchProjects();
       setProjects(projectPayload.projects);
       setActiveProjectId(projectPayload.activeProjectId ?? projectPayload.projects[0]?.id ?? "");
-      setAiStatus(status);
     } catch (caught) {
       setError(getError(caught));
     } finally {
       setLoading(false);
     }
+    void fetchAiStatus()
+      .then(setAiStatus)
+      .catch((caught) => setNotice(`AI 暂不可用，普通编辑不受影响：${getError(caught)}`));
   }
 
   useEffect(() => {
     if (!activeProjectId) {
       setLibrary(undefined);
+      setWorkflowStatus(undefined);
       return;
     }
     let cancelled = false;
@@ -247,7 +270,8 @@ export function App() {
         const allEntries = payload.groups.flatMap((group) => group.entries);
         const retained = allEntries.find((entry) => entry.path === selectedPath);
         const next = retained ?? payload.featured.latestChapter ?? payload.featured.context ?? allEntries[0];
-        setSelectedPath(next?.path ?? "");
+        if (next && !selectedPath) navigateToPath(next.path);
+        else setSelectedPath(next?.path ?? "");
         if (next && !openGroups.includes(next.groupId)) setOpenGroups((current) => [...current, next.groupId]);
       })
       .catch((caught) => setError(getError(caught)))
@@ -258,18 +282,37 @@ export function App() {
   }, [activeProjectId]);
 
   useEffect(() => {
+    if (!activeProjectId) return;
+    const controller = new AbortController();
+    setWorkflowLoading(true);
+    fetchWorkflowStatus(activeProjectId, selectedEntry?.chapterNumber, controller.signal)
+      .then(setWorkflowStatus)
+      .catch((caught) => {
+        if (caught instanceof DOMException && caught.name === "AbortError") return;
+        setNotice(`创作进度暂不可用：${getError(caught)}`);
+      })
+      .finally(() => !controller.signal.aborted && setWorkflowLoading(false));
+    return () => controller.abort();
+  }, [activeProjectId, selectedEntry?.chapterNumber, library?.generatedAt]);
+
+  useEffect(() => {
     if (!activeProjectId || !selectedPath) {
       setDocument(undefined);
       setDraftContent("");
       setSession(undefined);
       return;
     }
-    let cancelled = false;
+    const controller = new AbortController();
     sessionLoadedRef.current = false;
     setContentLoading(true);
-    Promise.all([fetchDocument(activeProjectId, selectedPath), fetchReviewSession(activeProjectId, selectedPath)])
+    for (const active of aiRequestsRef.current) active.abort();
+    aiRequestsRef.current.clear();
+    Promise.all([
+      fetchDocument(activeProjectId, selectedPath, controller.signal),
+      fetchReviewSession(activeProjectId, selectedPath, controller.signal)
+    ])
       .then(([documentPayload, sessionPayload]) => {
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         setDocument(documentPayload);
         setDraftContent(documentPayload.content);
         setSession({
@@ -283,21 +326,50 @@ export function App() {
         setSelectedAnnotationId(sessionPayload.annotations[0]?.id);
         sessionLoadedRef.current = true;
       })
-      .catch((caught) => setError(getError(caught)))
-      .finally(() => !cancelled && setContentLoading(false));
+      .catch((caught) => {
+        if (caught instanceof DOMException && caught.name === "AbortError") return;
+        setError(getError(caught));
+      })
+      .finally(() => !controller.signal.aborted && setContentLoading(false));
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [activeProjectId, selectedPath]);
 
   useEffect(() => {
     if (!session || !sessionLoadedRef.current) return;
     const timeout = window.setTimeout(() => {
-      saveReviewSession({ ...session, updatedAt: new Date().toISOString() })
-        .catch((caught) => setNotice(`批注暂未保存：${getError(caught)}`));
+      void persistReviewSession();
     }, 500);
     return () => window.clearTimeout(timeout);
   }, [session?.annotations, session?.chapterReviewRuns, session?.status]);
+
+  async function persistReviewSession() {
+    if (sessionSaveInFlightRef.current) {
+      sessionSavePendingRef.current = true;
+      return;
+    }
+    const candidate = sessionRef.current;
+    if (!candidate || !sessionLoadedRef.current) return;
+    sessionSaveInFlightRef.current = true;
+    try {
+      const saved = await saveReviewSession({ ...candidate, updatedAt: new Date().toISOString() });
+      const current = sessionRef.current;
+      if (current && current.projectId === saved.projectId && current.documentPath === saved.documentPath) {
+        const merged = { ...current, sessionRevision: saved.sessionRevision, updatedAt: saved.updatedAt };
+        sessionRef.current = merged;
+        setSession(merged);
+      }
+    } catch (caught) {
+      setNotice(`批注暂未保存：${getError(caught)}`);
+    } finally {
+      sessionSaveInFlightRef.current = false;
+      if (sessionSavePendingRef.current) {
+        sessionSavePendingRef.current = false;
+        void persistReviewSession();
+      }
+    }
+  }
 
   useEffect(() => {
     const trimmedQuery = query.trim();
@@ -351,9 +423,59 @@ export function App() {
     setAnnotationRevealRequest((current) => current?.requestId === requestId ? undefined : current);
   }, []);
 
+  function navigateToPath(path: string, record = true) {
+    if (record) {
+      setDocumentHistory((current) => {
+        const retained = current.slice(0, documentHistoryIndex + 1);
+        if (retained.at(-1) === path) return retained;
+        const next = [...retained, path].slice(-50);
+        setDocumentHistoryIndex(next.length - 1);
+        return next;
+      });
+    }
+    setSelectedPath(path);
+  }
+
+  function navigateDocumentHistory(direction: -1 | 1) {
+    const nextIndex = documentHistoryIndex + direction;
+    const nextPath = documentHistory[nextIndex];
+    if (!nextPath || (dirty && !window.confirm("当前草稿还没有保存。确定离开吗？"))) return;
+    setDocumentHistoryIndex(nextIndex);
+    navigateToPath(nextPath, false);
+    const entry = library?.groups.flatMap((group) => group.entries).find((item) => item.path === nextPath);
+    setMode(entry?.groupId === "chapters" ? "review" : "preview");
+  }
+
+  async function refreshWorkflow() {
+    if (!activeProjectId) return;
+    setWorkflowLoading(true);
+    try {
+      setWorkflowStatus(await fetchWorkflowStatus(activeProjectId, selectedEntry?.chapterNumber));
+    } finally {
+      setWorkflowLoading(false);
+    }
+  }
+
+  async function handleWorkflowAction(action: string, extra: Record<string, unknown> = {}) {
+    if (!activeProjectId || !workflowStatus) return;
+    setWorkflowBusy(true);
+    try {
+      const result = await runWorkflowAction(activeProjectId, { action, chapter: workflowStatus.chapter, ...extra });
+      setWorkflowStatus(result.status);
+      if (action === "generate_taskbook" || action === "check_body" || action === "apply_patch") {
+        setLibrary(await fetchLibrary(activeProjectId));
+      }
+      showNotice(result.output?.trim().split(/\r?\n/).at(-1) ?? "工作流动作已完成");
+    } catch (caught) {
+      showNotice(getError(caught));
+    } finally {
+      setWorkflowBusy(false);
+    }
+  }
+
   function selectEntry(entry: DocumentEntry) {
     if (dirty && !window.confirm("当前草稿还没有保存。确定切换文档吗？")) return;
-    setSelectedPath(entry.path);
+    navigateToPath(entry.path);
     setQuery("");
     setMode(entry.groupId === "chapters" ? "review" : "preview");
   }
@@ -364,6 +486,8 @@ export function App() {
       await updateProject(projectId, { active: true });
       setActiveProjectId(projectId);
       setSelectedPath("");
+      setDocumentHistory([]);
+      setDocumentHistoryIndex(-1);
     } catch (caught) {
       showNotice(getError(caught));
     }
@@ -432,7 +556,7 @@ export function App() {
       comment: "",
       messages: [],
       originalText: getLineText(draftContent, fromLine, toLine),
-      engine: aiStatus?.settings.engine ?? "deepseek",
+      engine: aiStatus?.settings.engine ?? "codex",
       status: "draft",
       anchorHash: createTextAnchor(draftContent, fromLine, toLine),
       createdAt: now,
@@ -476,6 +600,9 @@ export function App() {
     setRightVisible(true);
     setChapterReviewBusy(true);
     setChapterReviewMessage("正在运行本地确定性检查……");
+    const requestKey = `${session.projectId}:${session.documentPath}`;
+    const controller = new AbortController();
+    aiRequestsRef.current.add(controller);
     try {
       await streamChapterReview({
         projectId: session.projectId,
@@ -483,15 +610,18 @@ export function App() {
         content: draftContent,
         engine
       }, (event) => {
+        if (controller.signal.aborted || activeDocumentKeyRef.current !== requestKey) return;
         setChapterReviewMessage(event.message);
         if (event.run) upsertChapterReviewRun(event.run);
         if (event.type === "error") showNotice(event.message);
-      });
+      }, controller.signal);
     } catch (caught) {
+      if (controller.signal.aborted) return;
       const message = getError(caught);
       setChapterReviewMessage(message);
       showNotice(message);
     } finally {
+      aiRequestsRef.current.delete(controller);
       setChapterReviewBusy(false);
     }
   }
@@ -605,6 +735,9 @@ export function App() {
       status: "running",
       error: undefined
     });
+    const requestKey = `${session.projectId}:${session.documentPath}`;
+    const controller = new AbortController();
+    aiRequestsRef.current.add(controller);
     try {
       await streamAiSuggestion(
         {
@@ -619,6 +752,7 @@ export function App() {
           history: requestHistory
         },
         (event) => {
+          if (controller.signal.aborted || activeDocumentKeyRef.current !== requestKey) return;
           if (event.type === "result") {
             const assistantMessage: ReviewConversationMessage = {
               id: crypto.randomUUID(),
@@ -636,10 +770,14 @@ export function App() {
             });
           }
           if (event.type === "error") updateAnnotation(id, { status: "error", error: event.message });
-        }
+        },
+        controller.signal
       );
     } catch (caught) {
+      if (controller.signal.aborted) return;
       updateAnnotation(id, { status: "error", error: getError(caught) });
+    } finally {
+      aiRequestsRef.current.delete(controller);
     }
   }
 
@@ -685,7 +823,8 @@ export function App() {
   async function handleExport() {
     if (!session) return;
     try {
-      await saveReviewSession(session);
+      const savedSession = await saveReviewSession(session);
+      setSession(savedSession);
       const result = await exportReviewSession(session.projectId, session.documentPath);
       showNotice(`审校报告已导出：${result.path}`);
       setLibrary(await fetchLibrary(session.projectId));
@@ -708,7 +847,7 @@ export function App() {
       const created = await saveDocument(activeProjectId, path, `# ${path.split("/").at(-1)?.replace(/\.md$/i, "") ?? "未命名文档"}\n\n`);
       setNewDocumentOpen(false);
       setLibrary(await fetchLibrary(activeProjectId));
-      setSelectedPath(created.path);
+      navigateToPath(created.path);
       setMode("edit");
       showNotice("新文档已创建");
     } catch (caught) {
@@ -724,7 +863,8 @@ export function App() {
       const nextLibrary = await fetchLibrary(activeProjectId);
       setLibrary(nextLibrary);
       const next = nextLibrary.featured.latestChapter ?? nextLibrary.featured.context ?? nextLibrary.groups.flatMap((group) => group.entries)[0];
-      setSelectedPath(next?.path ?? "");
+      if (next) navigateToPath(next.path);
+      else setSelectedPath("");
       showNotice("文档已移到回收站，可以恢复");
     } catch (caught) {
       showNotice(getError(caught));
@@ -743,8 +883,8 @@ export function App() {
           <Circle className="control-expand" />
         </div>
         <div className="history-buttons">
-          <button className="icon-button" title="返回"><ArrowLeft size={17} /></button>
-          <button className="icon-button" title="前进"><ArrowRight size={17} /></button>
+          <button className="icon-button" aria-label="返回上一份文档" title="返回上一份文档" disabled={documentHistoryIndex <= 0} onClick={() => navigateDocumentHistory(-1)}><ArrowLeft size={17} /></button>
+          <button className="icon-button" aria-label="前进到下一份文档" title="前进到下一份文档" disabled={documentHistoryIndex < 0 || documentHistoryIndex >= documentHistory.length - 1} onClick={() => navigateDocumentHistory(1)}><ArrowRight size={17} /></button>
         </div>
         <div className="project-switcher" title={`当前作品：${activeProject?.name ?? "未选择作品"}`}>
           <BookOpen size={16} />
@@ -840,18 +980,22 @@ export function App() {
             ) : !document ? (
               <div className="surface-state"><FilePlus2 />请选择或新建一个 Markdown 文档</div>
             ) : mode === "preview" ? (
-              <div className="markdown-preview"><MarkdownView content={draftContent} /></div>
+              <Suspense fallback={<div className="surface-state"><LoaderCircle className="animate-spin" />正在载入预览…</div>}>
+                <div className="markdown-preview"><MarkdownView content={draftContent} /></div>
+              </Suspense>
             ) : (
-              <NovelEditor
-                value={draftContent}
-                mode={mode}
-                annotations={editorMarks}
-                selectedAnnotationId={selectedAnnotationId}
-                revealRequest={annotationRevealRequest}
-                onChange={handleDraftChange}
-                onLineClick={handleLineClick}
-                onRevealHandled={handleAnnotationRevealHandled}
-              />
+              <Suspense fallback={<div className="surface-state"><LoaderCircle className="animate-spin" />正在载入编辑器…</div>}>
+                <NovelEditor
+                  value={draftContent}
+                  mode={mode}
+                  annotations={editorMarks}
+                  selectedAnnotationId={selectedAnnotationId}
+                  revealRequest={annotationRevealRequest}
+                  onChange={handleDraftChange}
+                  onLineClick={handleLineClick}
+                  onRevealHandled={handleAnnotationRevealHandled}
+                />
+              </Suspense>
             )}
           </div>
         </section>
@@ -866,7 +1010,14 @@ export function App() {
         ) : null}
 
         {rightVisible ? (
-          <ReviewPanel
+          <aside className="right-workbench">
+            <nav className="right-tabs" aria-label="右侧工作台">
+              <button className={rightTab === "review" ? "active" : ""} onClick={() => setRightTab("review")}>审校</button>
+              <button className={rightTab === "workflow" ? "active" : ""} onClick={() => setRightTab("workflow")}>流程</button>
+              <button className={rightTab === "recovery" ? "active" : ""} onClick={() => setRightTab("recovery")}>恢复</button>
+              <button className="icon-button" onClick={() => setRightVisible(false)} title="关闭右栏"><X size={15} /></button>
+            </nav>
+            {rightTab === "review" ? <Suspense fallback={<div className="surface-state"><LoaderCircle className="animate-spin" />正在载入审校面板…</div>}><ReviewPanel
             annotations={session?.annotations ?? []}
             chapterReview={latestChapterReview}
             isChapter={selectedEntry?.groupId === "chapters"}
@@ -897,7 +1048,36 @@ export function App() {
               setMode("review");
             }}
             onExport={() => void handleExport()}
-          />
+            /></Suspense> : null}
+            {rightTab === "workflow" ? (
+              <WorkflowPanel
+                status={workflowStatus}
+                loading={workflowLoading}
+                busy={workflowBusy}
+                onRefresh={() => void refreshWorkflow()}
+                onAction={handleWorkflowAction}
+              />
+            ) : null}
+            {rightTab === "recovery" ? (
+              <RecoveryPanel
+                projectId={activeProjectId}
+                document={document}
+                onDocumentRestored={(restored) => {
+                  setDocument(restored);
+                  setDraftContent(restored.content);
+                  setSession((current) => current ? {
+                    ...current,
+                    baseRevision: restored.revision,
+                    chapterReviewRuns: current.chapterReviewRuns.map((run) => ({ ...run, status: "stale", verdict: "stale" }))
+                  } : current);
+                }}
+                onLibraryChanged={async () => {
+                  if (activeProjectId) setLibrary(await fetchLibrary(activeProjectId));
+                }}
+                onNotice={showNotice}
+              />
+            ) : null}
+          </aside>
         ) : null}
       </main>
 
@@ -1070,13 +1250,13 @@ function AiSettingsDialog({ status, onClose, onSave }: { status: AiStatus; onClo
   const [showApiKey, setShowApiKey] = useState(false);
   const [busy, setBusy] = useState(false);
   return (
-    <Modal title="AI 设置" subtitle="DeepSeek 密钥只保存到本机 .env，保存后不会回显" onClose={onClose}>
+    <Modal title="AI 设置" subtitle="默认复用 Codex 登录；DeepSeek 仅作为手动回退，密钥不会回显" onClose={onClose}>
       <div className="provider-grid">
-        <ProviderStatus name="DeepSeek V4 · 快速审校" available={status.deepseek.available} detail={status.deepseek.error ?? status.deepseek.model} selected={settings.engine === "deepseek"} onSelect={() => setSettings({ ...settings, engine: "deepseek" })} />
         <ProviderStatus name="Codex · 深度审校" available={status.codex.available} detail={status.codex.error ?? status.codex.model} selected={settings.engine === "codex"} onSelect={() => setSettings({ ...settings, engine: "codex" })} />
+        <ProviderStatus name="DeepSeek V4-Flash · 手动回退" available={status.deepseek.available} detail={status.deepseek.error ?? status.deepseek.model} selected={settings.engine === "deepseek"} onSelect={() => setSettings({ ...settings, engine: "deepseek" })} />
       </div>
-      <label className="field"><span>DeepSeek API 密钥</span><span className="secret-input"><input type={showApiKey ? "text" : "password"} value={deepseekApiKey} onChange={(event) => setDeepseekApiKey(event.target.value)} placeholder={status.deepseek.configured ? "已保存；留空表示不修改" : "粘贴以 sk- 开头的密钥"} autoComplete="new-password" /><button type="button" className="secret-toggle" onClick={() => setShowApiKey((current) => !current)} aria-label={showApiKey ? "隐藏密钥" : "显示密钥"} title={showApiKey ? "隐藏密钥" : "显示密钥"}>{showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}</button></span><small>保存时经本机页面发送给本机服务；接口只返回“已配置”，不会返回密钥内容。</small></label>
-      <label className="field"><span>DeepSeek V4 模型</span><select value={settings.model} onChange={(event) => setSettings({ ...settings, model: event.target.value })}><option value="deepseek-v4-flash">V4-Flash · 更快更省</option><option value="deepseek-v4-pro">V4-Pro · 质量优先</option></select></label>
+      <label className="field"><span>DeepSeek API 密钥（回退）</span><span className="secret-input"><input type={showApiKey ? "text" : "password"} value={deepseekApiKey} onChange={(event) => setDeepseekApiKey(event.target.value)} placeholder={status.deepseek.configured ? "已保存；留空表示不修改" : "粘贴以 sk- 开头的密钥"} autoComplete="new-password" /><button type="button" className="secret-toggle" onClick={() => setShowApiKey((current) => !current)} aria-label={showApiKey ? "隐藏密钥" : "显示密钥"} title={showApiKey ? "隐藏密钥" : "显示密钥"}>{showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}</button></span><small>只有手动切换到 DeepSeek 时才使用；接口只返回“已配置”，不会返回密钥内容。</small></label>
+      <label className="field"><span>DeepSeek 回退模型</span><input value="deepseek-v4-flash" readOnly /><small>DeepSeek 回退请求固定使用 V4-Flash。</small></label>
       <label className="field"><span>Codex 推理强度</span><select value={settings.reasoningEffort} onChange={(event) => setSettings({ ...settings, reasoningEffort: event.target.value as AiSettings["reasoningEffort"] })}><option value="low">低 · 更快</option><option value="medium">中 · 推荐</option><option value="high">高 · 更细致</option></select></label>
       <label className="check-field"><input type="checkbox" checked={settings.includeStyleGuide} onChange={(event) => setSettings({ ...settings, includeStyleGuide: event.target.checked })} /><span>读取当前小说的文风指南</span></label>
       <label className="check-field"><input type="checkbox" checked={settings.includeWritingTaskbook} onChange={(event) => setSettings({ ...settings, includeWritingTaskbook: event.target.checked })} /><span>划线精修时读取当前章节的本章写作任务书</span></label>

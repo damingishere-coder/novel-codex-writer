@@ -15,7 +15,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 1
+INDEX_SCHEMA_VERSION = 2
+PATCH_SCHEMA_VERSION = 2
+# Backward-compatible alias used by the rebuildable index.
+SCHEMA_VERSION = INDEX_SCHEMA_VERSION
 TASKBOOK_NAME = "本章写作任务书.md"
 LEGACY_CONTEXT_NAME = "本章上下文包.md"
 INDEX_NAME = "memory_index.json"
@@ -32,7 +35,13 @@ CHAPTER_RE = re.compile(r"第\s*0*(\d+)\s*章")
 VALID_STATUSES = {"active", "tentative", "closed", "outdated", "contradicted"}
 VALID_IMPORTANCE = {"critical", "high", "normal", "low"}
 VALID_ACTIONS = {"upsert", "close", "archive"}
+VALID_PATCH_KINDS = {"chapter_result", "outline_baseline", "migration", "legacy_unknown"}
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,80}$")
+SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
+PATCH_CLASSIFICATIONS_NAME = "patch_classifications.json"
+PATCH_COMPAT_DIR_NAME = "compat"
+FINALIZATION_MANIFEST_SCHEMA_VERSION = 1
+FINALIZATION_MANIFEST_RE = re.compile(r"^第(\d+)章_finalization\.json$")
 
 CATEGORY_FILES = {
     "character": "当前人物状态.md",
@@ -87,12 +96,20 @@ def read_text(path: Path) -> str:
 def atomic_write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    temporary.write_text(content, encoding="utf-8")
+    temporary.write_text(content, encoding="utf-8", newline="")
     os.replace(temporary, path)
 
 
 def atomic_write_json(path: Path, data: Any) -> None:
     atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+
+
+def sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def sha256_text(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def skill_repo_root() -> Path | None:
@@ -110,15 +127,8 @@ def resolve_library_root(value: str | Path) -> Path:
     return candidate.resolve()
 
 
-def resolve_project_root(library_root: Path, project_root: str | Path | None) -> Path:
-    if project_root:
-        candidate = Path(project_root)
-        candidate = candidate if candidate.is_absolute() else Path.cwd() / candidate
-        resolved = candidate.resolve()
-        if not resolved.exists():
-            raise MemorySystemError(f"找不到小说目录：{resolved}")
-        return resolved
-
+def load_project_registry(library_root: Path) -> dict[str, Any]:
+    library_root = library_root.resolve()
     index_path = library_root / "projects.json"
     if not index_path.exists():
         raise MemorySystemError(f"找不到作品库清单：{index_path}")
@@ -126,31 +136,82 @@ def resolve_project_root(library_root: Path, project_root: str | Path | None) ->
         index = json.loads(read_text(index_path))
     except json.JSONDecodeError as exc:
         raise MemorySystemError(f"作品库清单不是有效 JSON：{index_path}（{exc}）") from exc
+    if not isinstance(index, dict) or not isinstance(index.get("projects"), list):
+        raise MemorySystemError(f"作品库清单格式不正确：{index_path}")
+    return index
+
+
+def registered_project_roots(library_root: Path) -> dict[str, Path]:
+    index = load_project_registry(library_root)
+    roots: dict[str, Path] = {}
+    projects_root = (library_root.resolve() / "作品").resolve()
+    for item in index.get("projects", []):
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+            continue
+        project_id = item["id"].strip()
+        if not project_id or Path(project_id).name != project_id:
+            continue
+        resolved = (projects_root / project_id).resolve()
+        try:
+            resolved.relative_to(projects_root)
+        except ValueError:
+            continue
+        if resolved == projects_root:
+            continue
+        roots[project_id] = resolved
+    return roots
+
+
+def resolve_project_root(library_root: Path, project_root: str | Path | None) -> Path:
+    library_root = library_root.resolve()
+    index = load_project_registry(library_root)
+    roots = registered_project_roots(library_root)
+    if project_root:
+        candidate = Path(project_root)
+        candidate = candidate if candidate.is_absolute() else Path.cwd() / candidate
+        resolved = candidate.resolve()
+        registered = next((path for path in roots.values() if path == resolved), None)
+        if registered is None:
+            raise MemorySystemError(f"拒绝访问未登记在 projects.json 中的小说目录：{resolved}")
+        if not registered.exists():
+            raise MemorySystemError(f"找不到小说目录：{registered}")
+        return registered
+
     active_project_id = index.get("activeProjectId")
     if not active_project_id:
         raise MemorySystemError("当前没有选中的小说。请先在网页端新建或选择小说。")
-    projects_root = (library_root / "作品").resolve()
-    resolved = (projects_root / str(active_project_id)).resolve()
-    try:
-        resolved.relative_to(projects_root)
-    except ValueError as exc:
-        raise MemorySystemError(
-            f"activeProjectId 非法，项目目录必须位于作品库内：{active_project_id!r}"
-        ) from exc
-    if resolved == projects_root:
-        raise MemorySystemError("activeProjectId 不能指向作品库根目录。")
+    resolved = roots.get(str(active_project_id))
+    if resolved is None:
+        raise MemorySystemError(f"activeProjectId 未登记在 projects.json：{active_project_id}")
     if not resolved.exists():
         raise MemorySystemError(f"找不到当前小说目录：{resolved}")
     return resolved
 
 
-def project_root_from_current(current_dir: Path) -> Path:
+def project_root_from_current(current_dir: Path, library_root: Path | None = None) -> Path:
     resolved = current_dir.resolve()
     if resolved.name != "current" or resolved.parent.name != "记忆库":
         raise MemorySystemError(
             f"--current-dir 必须指向小说的 记忆库/current 目录：{resolved}"
         )
-    return resolved.parents[1]
+    project_root = resolved.parents[1]
+    if library_root is not None:
+        return resolve_project_root(library_root, project_root)
+    return project_root
+
+
+def assert_project_path(project_root: Path, candidate: Path, label: str = "路径") -> Path:
+    root = project_root.resolve()
+    resolved = candidate.resolve()
+    if resolved != root and root not in resolved.parents:
+        raise MemorySystemError(f"{label}越出当前小说目录：{resolved}")
+    return resolved
+
+
+def resolve_project_path(project_root: Path, value: str | Path, label: str = "路径") -> Path:
+    candidate = Path(value)
+    resolved = candidate.resolve() if candidate.is_absolute() else (Path.cwd() / candidate).resolve()
+    return assert_project_path(project_root, resolved, label)
 
 
 def normalize_chapter(value: str | int) -> tuple[int, str]:
@@ -360,14 +421,31 @@ def load_patch(path: Path) -> dict[str, Any]:
     return data
 
 
+def _validate_revision_map(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise MemorySystemError("source_revisions 必须是“项目内相对路径 -> SHA-256”的对象。")
+    normalized: dict[str, str] = {}
+    for raw_path, raw_revision in value.items():
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            raise MemorySystemError("source_revisions 的路径必须是非空字符串。")
+        path = Path(raw_path.replace("\\", "/"))
+        if path.is_absolute() or ".." in path.parts:
+            raise MemorySystemError(f"source_revisions 包含越界路径：{raw_path}")
+        if not isinstance(raw_revision, str) or not SHA256_RE.fullmatch(raw_revision.lower()):
+            raise MemorySystemError(f"source_revisions 的 revision 不是 SHA-256：{raw_path}")
+        normalized[path.as_posix()] = raw_revision.lower()
+    return normalized
+
+
 def validate_patch(patch: dict[str, Any]) -> dict[str, Any]:
     required = ("schema_version", "patch_id", "chapter", "summary", "ending_state", "operations")
     missing = [field for field in required if field not in patch]
     if missing:
         raise MemorySystemError(f"memory_patch 缺少字段：{', '.join(missing)}")
-    if patch["schema_version"] != SCHEMA_VERSION:
+    schema_version = patch["schema_version"]
+    if schema_version not in {1, PATCH_SCHEMA_VERSION}:
         raise MemorySystemError(
-            f"不支持的 schema_version：{patch['schema_version']}，当前只支持 {SCHEMA_VERSION}。"
+            f"不支持的 schema_version：{schema_version}，当前支持 1 和 {PATCH_SCHEMA_VERSION}。"
         )
     patch_id = patch["patch_id"]
     if not isinstance(patch_id, str) or not ID_RE.fullmatch(patch_id):
@@ -383,6 +461,29 @@ def validate_patch(patch: dict[str, Any]) -> dict[str, Any]:
         raise MemorySystemError("operations 必须是数组。")
 
     normalized = dict(patch)
+    if schema_version == 1:
+        normalized["kind"] = "legacy_unknown"
+        normalized["chapter_revision"] = None
+        normalized["source_revisions"] = {}
+    else:
+        kind = patch.get("kind")
+        if kind not in VALID_PATCH_KINDS - {"legacy_unknown"}:
+            raise MemorySystemError(f"memory_patch kind 无效：{kind!r}")
+        chapter_revision = patch.get("chapter_revision")
+        if kind == "chapter_result":
+            if not isinstance(chapter_revision, str) or not SHA256_RE.fullmatch(chapter_revision.lower()):
+                raise MemorySystemError("chapter_result 必须提供正文 SHA-256：chapter_revision。")
+            normalized["chapter_revision"] = chapter_revision.lower()
+        elif chapter_revision is not None:
+            if not isinstance(chapter_revision, str) or not SHA256_RE.fullmatch(chapter_revision.lower()):
+                raise MemorySystemError("chapter_revision 必须是 SHA-256 或 null。")
+            normalized["chapter_revision"] = chapter_revision.lower()
+        else:
+            normalized["chapter_revision"] = None
+        normalized["kind"] = kind
+        normalized["source_revisions"] = _validate_revision_map(patch.get("source_revisions", {}))
+        if kind == "chapter_result" and not normalized["source_revisions"]:
+            raise MemorySystemError("chapter_result 必须提供非空 source_revisions。")
     normalized_operations: list[dict[str, Any]] = []
     touched: set[str] = set()
     for position, operation in enumerate(operations, start=1):
@@ -439,27 +540,265 @@ def render_patch_markdown(patch: dict[str, Any]) -> str:
     )
 
 
+def patch_classifications_path(project_root: Path) -> Path:
+    return project_root / "章节提交" / PATCH_COMPAT_DIR_NAME / PATCH_CLASSIFICATIONS_NAME
+
+
+def legacy_patch_classifications_path(project_root: Path) -> Path:
+    return project_root / "章节提交" / PATCH_CLASSIFICATIONS_NAME
+
+
+def patch_classifications_read_path(project_root: Path) -> Path:
+    current = patch_classifications_path(project_root)
+    return current if current.exists() else legacy_patch_classifications_path(project_root)
+
+
+def load_patch_classifications(project_root: Path) -> dict[str, str]:
+    path = patch_classifications_read_path(project_root)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(read_text(path))
+    except json.JSONDecodeError as exc:
+        raise MemorySystemError(f"patch 分类文件不是有效 JSON：{path}") from exc
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        raise MemorySystemError(f"patch 分类文件格式不正确：{path}")
+    values = payload.get("classifications", {})
+    if not isinstance(values, dict):
+        raise MemorySystemError(f"patch 分类列表格式不正确：{path}")
+    result: dict[str, str] = {}
+    for patch_id, kind in values.items():
+        if not isinstance(patch_id, str) or not ID_RE.fullmatch(patch_id):
+            raise MemorySystemError(f"patch 分类包含无效 patch_id：{patch_id!r}")
+        if kind not in VALID_PATCH_KINDS - {"legacy_unknown"}:
+            raise MemorySystemError(f"patch 分类包含无效 kind：{kind!r}")
+        result[patch_id] = kind
+    return result
+
+
+def patch_classification_payload(classifications: dict[str, str]) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "updated_at": now_iso(),
+        "classifications": dict(sorted(classifications.items())),
+    }
+
+
+def finalization_manifest_path(project_root: Path, chapter: int) -> Path:
+    return project_root / "章节提交" / f"第{chapter:03d}章_finalization.json"
+
+
+def _revision_source_paths(project_root: Path, patch: dict[str, Any]) -> dict[str, Path]:
+    resolved: dict[str, Path] = {}
+    for relative, expected_revision in patch.get("source_revisions", {}).items():
+        target = assert_project_path(project_root, project_root / relative, "revision 来源")
+        if not target.is_file():
+            raise MemorySystemError(f"revision 来源不存在：{relative}")
+        actual_revision = sha256_file(target)
+        if actual_revision != expected_revision:
+            raise MemorySystemError(
+                f"revision 来源已变化：{relative}（期望 {expected_revision[:12]}，实际 {actual_revision[:12]}）"
+            )
+        resolved[relative] = target
+    return resolved
+
+
+def validate_patch_source_revisions(project_root: Path, patch: dict[str, Any]) -> dict[str, Path]:
+    """Validate chapter-result evidence without changing any project file."""
+
+    if patch.get("kind") != "chapter_result":
+        return _revision_source_paths(project_root, patch)
+
+    chapter = int(patch["chapter"])
+    sources = _revision_source_paths(project_root, patch)
+    source_paths = set(sources)
+    body_sources = [
+        (relative, path)
+        for relative, path in sources.items()
+        if Path(relative).parts[:1] == ("正文",)
+        and parse_chapter_number(path, read_text(path)) == chapter
+    ]
+    if len(body_sources) != 1:
+        raise MemorySystemError(f"chapter_result 必须且只能绑定一份第{chapter:03d}章正文。")
+    body_relative, body_path = body_sources[0]
+    if sha256_file(body_path) != patch.get("chapter_revision"):
+        raise MemorySystemError(f"chapter_revision 与正文 {body_relative} 不一致。")
+
+    blueprint = find_blueprint(project_root, chapter)
+    if blueprint is None:
+        raise MemorySystemError(f"第{chapter:03d}章缺少细纲，不能最终化。")
+    blueprint_relative = blueprint.relative_to(project_root).as_posix()
+    if blueprint_relative not in source_paths:
+        raise MemorySystemError(f"source_revisions 缺少细纲：{blueprint_relative}")
+
+    taskbook_relative = f"记忆库/current/{TASKBOOK_NAME}"
+    if taskbook_relative not in source_paths:
+        raise MemorySystemError(f"source_revisions 缺少任务书：{taskbook_relative}")
+
+    review_sources = [
+        path
+        for relative, path in sources.items()
+        if Path(relative).parts[:1] == ("审查报告",)
+        and parse_chapter_number(path, read_text(path)) == chapter
+    ]
+    if len(review_sources) != 1:
+        raise MemorySystemError(f"chapter_result 必须且只能绑定一份第{chapter:03d}章审查报告。")
+
+    commit_sources = [
+        path
+        for relative, path in sources.items()
+        if Path(relative).parts[:1] == ("章节提交",)
+        and path.suffix.lower() == ".md"
+        and not path.name.startswith("memory_patch_")
+        and parse_chapter_number(path, read_text(path)) == chapter
+    ]
+    if len(commit_sources) != 1:
+        raise MemorySystemError(f"chapter_result 必须且只能绑定一份第{chapter:03d}章提交记录。")
+
+    chapter_revision = str(patch["chapter_revision"])
+    for label, evidence_path in (("审查报告", review_sources[0]), ("章节提交", commit_sources[0])):
+        if chapter_revision not in read_text(evidence_path):
+            relative = evidence_path.relative_to(project_root).as_posix()
+            raise MemorySystemError(f"{label}未记录正文 revision，不能证明对应当前正文：{relative}")
+    return sources
+
+
+def build_finalization_manifest(
+    project_root: Path,
+    patch: dict[str, Any],
+    patch_path: Path,
+    patch_content: str,
+) -> dict[str, Any]:
+    sources = validate_patch_source_revisions(project_root, patch)
+    return {
+        "schema_version": FINALIZATION_MANIFEST_SCHEMA_VERSION,
+        "chapter": int(patch["chapter"]),
+        "status": "finalized",
+        "patch_id": patch["patch_id"],
+        "finalized_at": now_iso(),
+        "chapter_revision": patch.get("chapter_revision"),
+        "sources": [
+            {"path": relative, "revision": patch["source_revisions"][relative]}
+            for relative in sorted(sources)
+        ],
+        "patch": {
+            "path": patch_path.relative_to(project_root).as_posix(),
+            "revision": sha256_text(patch_content),
+        },
+    }
+
+
+def load_finalization_manifest(path: Path) -> dict[str, Any]:
+    try:
+        manifest = json.loads(read_text(path))
+    except json.JSONDecodeError as exc:
+        raise MemorySystemError(f"章节最终化 manifest 不是有效 JSON：{path}") from exc
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != FINALIZATION_MANIFEST_SCHEMA_VERSION:
+        raise MemorySystemError(f"章节最终化 manifest 版本不受支持：{path}")
+    if not isinstance(manifest.get("chapter"), int) or manifest["chapter"] <= 0:
+        raise MemorySystemError(f"章节最终化 manifest 缺少有效 chapter：{path}")
+    return manifest
+
+
+def finalization_manifest_freshness(project_root: Path, manifest: dict[str, Any]) -> tuple[bool, list[str]]:
+    reasons: list[str] = []
+    evidence = list(manifest.get("sources", []))
+    patch = manifest.get("patch")
+    if isinstance(patch, dict):
+        evidence.append({"path": patch.get("path"), "revision": patch.get("revision")})
+    else:
+        reasons.append("缺少 patch 绑定")
+    for item in evidence:
+        if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+            reasons.append("存在无效来源记录")
+            continue
+        relative = item["path"]
+        expected = item.get("revision")
+        try:
+            target = assert_project_path(project_root, project_root / relative, "manifest 来源")
+        except MemorySystemError as exc:
+            reasons.append(str(exc))
+            continue
+        if not target.is_file():
+            reasons.append(f"文件已缺失：{relative}")
+        elif not isinstance(expected, str) or sha256_file(target) != expected:
+            reasons.append(f"文件已变化：{relative}")
+    return not reasons, reasons
+
+
+def chapter_finalization_status(project_root: Path, chapter: int) -> dict[str, Any]:
+    path = finalization_manifest_path(project_root, chapter)
+    if not path.exists():
+        return {"status": "missing", "path": path.relative_to(project_root).as_posix(), "reasons": []}
+    manifest = load_finalization_manifest(path)
+    fresh, reasons = finalization_manifest_freshness(project_root, manifest)
+    return {
+        "status": "finalized" if fresh else "stale",
+        "path": path.relative_to(project_root).as_posix(),
+        "reasons": reasons,
+        "manifest": manifest,
+    }
+
+
 def load_patch_history(project_root: Path) -> list[dict[str, Any]]:
     history: list[dict[str, Any]] = []
     ids: set[str] = set()
+    classifications = load_patch_classifications(project_root)
+    manifest_selection: dict[int, str] = {}
+    for manifest_path in sorted((project_root / "章节提交").glob("第*章_finalization.json")):
+        manifest = load_finalization_manifest(manifest_path)
+        if isinstance(manifest.get("patch_id"), str):
+            manifest_selection[int(manifest["chapter"])] = str(manifest["patch_id"])
     for path in patch_source_files(project_root):
         patch = validate_patch(load_patch(path))
         patch_id = patch["patch_id"]
         if patch_id in ids:
             raise MemorySystemError(f"章节提交中存在重复 patch_id：{patch_id}")
         ids.add(patch_id)
+        if patch["kind"] == "legacy_unknown" and patch_id in classifications:
+            patch = {**patch, "kind": classifications[patch_id]}
+        if manifest_selection.get(int(patch["chapter"])) == patch_id:
+            patch = {**patch, "selected_by_manifest": True}
         history.append(patch)
     return sorted(history, key=lambda item: (int(item["chapter"]), str(item["patch_id"])))
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def select_chapter_result_patches(patches: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for patch in patches:
+        grouped.setdefault(int(patch["chapter"]), []).append(patch)
+    selected: list[dict[str, Any]] = []
+    for chapter, items in sorted(grouped.items()):
+        explicit = [item for item in items if item.get("kind") == "chapter_result"]
+        if len(explicit) > 1:
+            selected_by_manifest = [item for item in explicit if item.get("selected_by_manifest") is True]
+            if len(selected_by_manifest) == 1:
+                selected.append(selected_by_manifest[0])
+                continue
+            labels = "、".join(str(item["patch_id"]) for item in explicit)
+            raise MemorySystemError(f"第{chapter:03d}章存在多个 chapter_result patch 且 manifest 未唯一选定：{labels}")
+        if explicit:
+            selected.append(explicit[0])
+            continue
+        legacy = [item for item in items if item.get("kind") == "legacy_unknown"]
+        if len(legacy) > 1:
+            labels = "、".join(str(item["patch_id"]) for item in legacy)
+            raise MemorySystemError(
+                f"第{chapter:03d}章存在多个未分类旧 patch：{labels}。请先确认哪一个是 chapter_result。"
+            )
+        if legacy:
+            selected.append({**legacy[0], "effective_kind": "chapter_result"})
+    return selected
 
 
 def source_hashes(project_root: Path) -> dict[str, str]:
     paths = memory_source_files(project_root) + patch_source_files(project_root)
+    for classification_path in (patch_classifications_path(project_root), legacy_patch_classifications_path(project_root)):
+        if classification_path.exists():
+            paths.append(classification_path)
+    paths.extend(sorted((project_root / "章节提交").glob("第*章_finalization.json")))
     return {
-        path.resolve().relative_to(project_root.resolve()).as_posix(): _sha256(path)
+        path.resolve().relative_to(project_root.resolve()).as_posix(): sha256_file(path)
         for path in sorted(paths)
     }
 
@@ -467,6 +806,7 @@ def source_hashes(project_root: Path) -> dict[str, str]:
 def build_index_data(project_root: Path) -> dict[str, Any]:
     records = load_all_records(project_root)
     patches = load_patch_history(project_root)
+    chapter_results = select_chapter_result_patches(patches)
     serialized_records = []
     for record in records:
         metadata = record.metadata
@@ -492,10 +832,12 @@ def build_index_data(project_root: Path) -> dict[str, Any]:
         {
             "chapter": patch["chapter"],
             "patch_id": patch["patch_id"],
+            "kind": patch.get("effective_kind", patch.get("kind", "legacy_unknown")),
+            "chapter_revision": patch.get("chapter_revision"),
             "summary": patch["summary"],
             "ending_state": patch["ending_state"],
         }
-        for patch in patches
+        for patch in chapter_results
     ]
     return {
         "schema_version": SCHEMA_VERSION,
@@ -529,7 +871,7 @@ def index_stale(project_root: Path, data: dict[str, Any] | None = None) -> bool:
     return data.get("schema_version") != SCHEMA_VERSION or data.get("source_hashes") != source_hashes(project_root)
 
 
-def ensure_index(project_root: Path) -> dict[str, Any]:
+def ensure_index(project_root: Path, *, persist: bool = True) -> dict[str, Any]:
     path = index_path(project_root)
     if path.exists():
         try:
@@ -538,7 +880,10 @@ def ensure_index(project_root: Path) -> dict[str, Any]:
             data = None
         if data is not None and not index_stale(project_root, data):
             return data
-    return rebuild_index(project_root)
+    data = build_index_data(project_root)
+    if persist:
+        atomic_write_json(path, data)
+    return data
 
 
 def _record_is_valid(metadata: dict[str, Any], chapter: int) -> bool:
@@ -737,7 +1082,35 @@ def blocked_taskbook_from_legacy(legacy_text: str = "") -> str:
     )
 
 
-def recover_transactions(project_root: Path) -> list[str]:
+def inspect_transactions(project_root: Path) -> list[dict[str, Any]]:
+    transaction_root = project_root / "记忆库" / ".transactions"
+    if not transaction_root.exists():
+        return []
+    pending: list[dict[str, Any]] = []
+    for directory in sorted(path for path in transaction_root.iterdir() if path.is_dir()):
+        manifest_path = directory / "manifest.json"
+        if not manifest_path.exists():
+            pending.append({"id": directory.name, "status": "missing_manifest", "legacy": True, "files": []})
+            continue
+        try:
+            manifest = json.loads(read_text(manifest_path))
+        except json.JSONDecodeError:
+            raise MemorySystemError(f"事务恢复清单损坏，请人工检查：{manifest_path}")
+        if manifest.get("status") == "complete":
+            continue
+        files = manifest.get("files", []) if isinstance(manifest.get("files"), list) else []
+        pending.append(
+            {
+                "id": directory.name,
+                "status": str(manifest.get("status", "unknown")),
+                "legacy": any("before_hash" not in item or "staged_hash" not in item for item in files if isinstance(item, dict)),
+                "files": [str(item.get("target", "")) for item in files if isinstance(item, dict)],
+            }
+        )
+    return pending
+
+
+def recover_transactions(project_root: Path, *, force_legacy: bool = False) -> list[str]:
     transaction_root = project_root / "记忆库" / ".transactions"
     recovered: list[str] = []
     if not transaction_root.exists():
@@ -745,21 +1118,46 @@ def recover_transactions(project_root: Path) -> list[str]:
     for directory in sorted(path for path in transaction_root.iterdir() if path.is_dir()):
         manifest_path = directory / "manifest.json"
         if not manifest_path.exists():
-            shutil.rmtree(directory, ignore_errors=True)
-            continue
+            raise MemorySystemError(f"事务目录缺少 manifest.json，请人工检查：{directory}")
         try:
             manifest = json.loads(read_text(manifest_path))
-        except json.JSONDecodeError:
-            raise MemorySystemError(f"事务恢复清单损坏，请人工检查：{manifest_path}")
+        except json.JSONDecodeError as exc:
+            raise MemorySystemError(f"事务恢复清单损坏，请人工检查：{manifest_path}") from exc
         if manifest.get("status") == "complete":
             shutil.rmtree(directory, ignore_errors=True)
             continue
+        files = manifest.get("files", [])
+        if not isinstance(files, list):
+            raise MemorySystemError(f"事务恢复清单 files 格式不正确：{manifest_path}")
+        legacy = any(
+            not isinstance(item, dict) or "before_hash" not in item or "staged_hash" not in item
+            for item in files
+        )
+        if legacy and not force_legacy:
+            raise MemorySystemError(
+                f"旧事务缺少 hash，不能自动确认外部改动：{directory.name}。"
+                "确认没有人工修改后再使用 --force-legacy-recovery。"
+            )
+        for item in files:
+            if not isinstance(item, dict):
+                raise MemorySystemError(f"事务文件记录格式不正确：{manifest_path}")
+            target = assert_project_path(project_root, project_root / str(item.get("target", "")), "事务目标")
+            if legacy:
+                continue
+            actual_hash = sha256_file(target) if target.exists() else None
+            allowed_hashes = {item.get("before_hash"), item.get("staged_hash")}
+            if actual_hash not in allowed_hashes:
+                raise MemorySystemError(
+                    f"事务恢复检测到外部修改，已停止：{target.relative_to(project_root).as_posix()}"
+                )
         for item in reversed(manifest.get("files", [])):
-            target = (project_root / item["target"]).resolve()
-            if project_root.resolve() not in target.parents:
-                raise MemorySystemError(f"事务目标越出小说目录：{target}")
+            target = assert_project_path(project_root, project_root / str(item["target"]), "事务目标")
             backup = directory / item["backup"]
             if item.get("had_original"):
+                if not backup.exists():
+                    raise MemorySystemError(f"事务备份缺失，请人工检查：{backup}")
+                if not legacy and sha256_file(backup) != item.get("before_hash"):
+                    raise MemorySystemError(f"事务备份 hash 不匹配，请人工检查：{backup}")
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(backup, target)
             elif target.exists():
@@ -787,18 +1185,22 @@ def apply_transaction(project_root: Path, changes: dict[Path, str | None]) -> No
         if project_root not in target.parents:
             raise MemorySystemError(f"拒绝修改小说目录外的文件：{target}")
         had_original = target.exists()
+        before_hash = sha256_file(target) if had_original else None
         backup_name = f"backup/{position}.bak"
         staged_name = f"staged/{position}.new"
         if had_original:
             shutil.copy2(target, directory / backup_name)
         if content is not None:
-            (directory / staged_name).write_text(content, encoding="utf-8")
+            (directory / staged_name).write_text(content, encoding="utf-8", newline="")
+        staged_hash = sha256_file(directory / staged_name) if content is not None else None
         files.append(
             {
                 "target": target.relative_to(project_root).as_posix(),
                 "had_original": had_original,
                 "backup": backup_name,
                 "staged": staged_name if content is not None else None,
+                "before_hash": before_hash,
+                "staged_hash": staged_hash,
             }
         )
     manifest = {"status": "writing", "created_at": now_iso(), "files": files}
@@ -855,6 +1257,20 @@ def current_path_for(project_root: Path, category: str) -> Path:
 def diagnostics(project_root: Path, chapter: int | None = None) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
     try:
+        pending_transactions = inspect_transactions(project_root)
+    except MemorySystemError as exc:
+        pending_transactions = []
+        findings.append({"severity": "error", "code": "TRANSACTION_INVALID", "message": str(exc)})
+    for transaction in pending_transactions:
+        severity = "error" if transaction["status"] == "missing_manifest" else "blocked"
+        findings.append(
+            {
+                "severity": severity,
+                "code": "TRANSACTION_PENDING",
+                "message": f"发现未完成事务 {transaction['id']}；默认不会自动恢复，请显式执行 --recover。",
+            }
+        )
+    try:
         discover_arc_outlines(project_root)
     except MemorySystemError as exc:
         findings.append({"severity": "error", "code": "OUTLINE_INVALID", "message": str(exc)})
@@ -876,6 +1292,11 @@ def diagnostics(project_root: Path, chapter: int | None = None) -> list[dict[str
         findings.append(
             {"severity": "warning", "code": "INDEX_STALE", "message": "memory_index.json 缺失或已过期，可安全重建。"}
         )
+    try:
+        index_data = build_index_data(project_root)
+    except MemorySystemError as exc:
+        index_data = None
+        findings.append({"severity": "blocked", "code": "PATCH_HISTORY_BLOCKED", "message": str(exc)})
     for path in memory_source_files(project_root):
         if "current" not in path.parts and path.name != "不可违背事实.md":
             continue
@@ -922,8 +1343,23 @@ def diagnostics(project_root: Path, chapter: int | None = None) -> list[dict[str
                     "message": f"记忆 {record.record_id} 缺少 source_chapter。",
                 }
             )
-    if chapter and chapter > 1:
-        summaries = {int(item["chapter"]) for item in build_index_data(project_root)["chapter_summaries"]}
+    for manifest_path in sorted((project_root / "章节提交").glob("第*章_finalization.json")):
+        try:
+            manifest = load_finalization_manifest(manifest_path)
+            fresh, reasons = finalization_manifest_freshness(project_root, manifest)
+        except MemorySystemError as exc:
+            findings.append({"severity": "error", "code": "MANIFEST_INVALID", "message": str(exc)})
+            continue
+        if not fresh:
+            findings.append(
+                {
+                    "severity": "blocked",
+                    "code": "FINALIZATION_STALE",
+                    "message": f"第{manifest['chapter']:03d}章最终化产物已失效：" + "；".join(reasons),
+                }
+            )
+    if chapter and chapter > 1 and index_data is not None:
+        summaries = {int(item["chapter"]) for item in index_data["chapter_summaries"]}
         previous_chapter = chapter - 1
         previous_exists = any(
             parse_chapter_number(path, read_text(path)) == previous_chapter

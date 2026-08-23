@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -14,18 +15,21 @@ from memory_common import (
     append_record_to_text,
     apply_transaction,
     archive_path_for,
+    build_finalization_manifest,
     current_path_for,
+    finalization_manifest_path,
+    inspect_transactions,
     load_all_records,
     load_patch,
     load_patch_history,
     project_root_from_current,
     read_text,
     rebuild_index,
-    recover_transactions,
     remove_record_blocks,
     render_patch_markdown,
     render_record,
     resolve_library_root,
+    resolve_project_path,
     resolve_project_root,
     validate_patch,
 )
@@ -48,7 +52,7 @@ def resolve_roots(library_root: Path, current_dir: str | None) -> tuple[Path, Pa
     if current_dir:
         candidate = Path(current_dir)
         resolved = candidate.resolve() if candidate.is_absolute() else (Path.cwd() / candidate).resolve()
-        project_root = project_root_from_current(resolved)
+        project_root = project_root_from_current(resolved, library_root)
         return project_root, resolved
     project_root = resolve_project_root(library_root, None)
     return project_root, project_root / "记忆库" / "current"
@@ -123,24 +127,45 @@ def main() -> int:
     try:
         library_root = resolve_library_root(args.library_root)
         project_root, current_dir = resolve_roots(library_root, args.current_dir)
-        recovered = recover_transactions(project_root)
-        patch_path = Path(args.patch)
-        patch_path = patch_path if patch_path.is_absolute() else (Path.cwd() / patch_path)
-        patch = validate_patch(load_patch(patch_path.resolve()))
+        pending_transactions = inspect_transactions(project_root)
+        if pending_transactions:
+            raise MemorySystemError("存在未完成事务。请先运行 memory_doctor.py --recover。")
+        patch_path = resolve_project_path(project_root, args.patch, "memory_patch 输入")
+        patch = validate_patch(load_patch(patch_path))
 
         history = load_patch_history(project_root)
         previous_patch = next((item for item in history if item["patch_id"] == patch["patch_id"]), None)
         if previous_patch is not None:
-            if previous_patch != patch:
+            comparable_previous = {
+                key: value
+                for key, value in previous_patch.items()
+                if key not in {"selected_by_manifest", "effective_kind"}
+            }
+            if comparable_previous != patch:
                 raise MemorySystemError(
                     f"patch_id {patch['patch_id']} 已经使用过，但内容不同。请更换 patch_id。"
                 )
-            rebuild_index(project_root)
             print(f"补丁 {patch['patch_id']} 已应用过，本次幂等跳过。")
             return 0
 
+        if patch["schema_version"] != 2:
+            raise MemorySystemError("旧版 patch 仅支持向后读取；新应用请生成 schema v2 patch。")
+
         records = load_all_records(project_root)
         changes, report = prepare_changes(project_root, patch, records)
+        if patch["kind"] == "chapter_result":
+            stored_patch_path = patch_source_path(project_root, patch).resolve()
+            stored_patch_content = changes[stored_patch_path]
+            assert isinstance(stored_patch_content, str)
+            manifest = build_finalization_manifest(
+                project_root,
+                patch,
+                stored_patch_path,
+                stored_patch_content,
+            )
+            manifest_path = finalization_manifest_path(project_root, int(patch["chapter"])).resolve()
+            changes[manifest_path] = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+            report.append(f"最终化 manifest -> {manifest_path.relative_to(project_root).as_posix()}")
         if not args.dry_run:
             apply_transaction(project_root, changes)
             rebuild_index(project_root)
@@ -150,8 +175,6 @@ def main() -> int:
 
     print(f"小说目录：{project_root}")
     print(f"current 目录：{current_dir}")
-    if recovered:
-        print("已恢复未完成事务：" + "、".join(recovered))
     print(f"补丁：{patch['patch_id']}（第{int(patch['chapter']):03d}章）")
     print("执行模式：" + ("dry-run，只校验不写入" if args.dry_run else "已写入"))
     for item in report:
@@ -163,4 +186,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

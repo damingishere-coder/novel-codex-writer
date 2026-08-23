@@ -4,28 +4,36 @@
 
 当前版本已经改成“作品库”模式：同一个网页端可以创建、切换、编辑和删除多本小说。
 
+右侧工作台包含三个页签：
+
+- “审校”：划线批注与整章审阅；结果绑定作品、文档和正文 revision。
+- “流程”：显示细纲、任务书、正文、审查、章节提交和记忆更新六步状态，并只推荐一个下一步。
+- “恢复”：查看最近 30 个唯一版本、预览差异、恢复历史、恢复回收站文件，以及导出整书 Markdown 或完整 ZIP 备份。
+
+普通编辑不依赖 AI。DeepSeek 或 Codex 暂不可用时，读取、编辑、保存、版本恢复和导出仍可使用。
+
 ## 本地网页工作台
 
-如果你想用网页管理小说资料，在本目录双击：
+如果你想用网页管理小说资料，默认启动使用 Windows 本机 Node/Vite，不需要 Docker：
 
-- `启动网页.bat`：用 Docker 启动网页，并自动打开 `http://localhost:5173/`
-- `关闭网页.bat`：关闭网页服务
+- `启动网页.bat` 或 `start-web.bat`：启动本机网页并打开 `http://127.0.0.1:5174/`
+- `关闭网页.bat` 或 `stop-web.bat`：停止本机网页服务
 
-启动后，Docker Desktop 的 Containers 页面会出现 `novel-codex-workbench`。
+本机启动首次发现依赖缺失时会自动运行 `npm ci`。进程 PID、启动时间和日志只保存在被 Git 忽略的 `.runtime/` 目录中。Docker 作为可选回退：使用 `start-docker.bat` 和 `stop-docker.bat`，容器入口仍使用 `http://localhost:5173/`。
 
-第一次启动需要 Docker Desktop 完成初始化，可能会等几分钟。
+本机模式下 Codex 直接使用宿主机已有的 Codex App/CLI 登录，不复制 `auth.json`；Docker 回退脚本保留原有容器启动逻辑。
 
 ## AI 审校（可选）
 
-工作台现在提供带行号的“审校”模式：点击行号可以批注单行，按住 `Shift` 再点击另一个行号可以选择连续多行。右侧可使用 DeepSeek V4 快速审校，或使用 Codex 深度审校。每条结果都会分别显示原文、建议改为和修改说明；“采用”只改当前草稿，必须再点击顶部“保存”才会写入正文。
+工作台现在提供带行号的“审校”模式：点击行号可以批注单行，按住 `Shift` 再点击另一个行号可以选择连续多行。右侧可使用 DeepSeek V4-Flash 快速审校，或使用 Codex 深度审校。每条结果都会分别显示原文、建议改为和修改说明；“采用”只改当前草稿，必须再点击顶部“保存”才会写入正文。
 
 第一次配置 DeepSeek 时不需要打开终端：
 
 1. 打开网页左下角的“AI 设置”。
-2. 在 DeepSeek API 密钥输入框中粘贴密钥，并选择 V4-Flash 或 V4-Pro。
+2. 在 DeepSeek API 密钥输入框中粘贴密钥；所有 DeepSeek 请求固定使用 `deepseek-v4-flash`。
 3. 点击“保存设置”。也可以继续使用项目根目录的 `配置AI密钥.bat` 作为备用方式。
 
-真实密钥只保存在本机 `.env` 文件中。该文件已经被 Git 忽略，网页 API 只返回“已配置/未配置”，不会返回密钥内容。Codex 不需要单独的 API 密钥；启动脚本会把本机 Codex App / CLI 已缓存的 ChatGPT 登录安全复制到 Docker 容器中供 Codex CLI 使用。没有配置 AI 时，普通阅读、编辑、保存和批注功能仍可正常使用。
+真实密钥只保存在本机 `.env` 文件中。该文件已经被 Git 忽略，网页 API 只返回“已配置/未配置”，不会返回密钥内容。Codex 不需要单独的 API 密钥；本机模式直接使用宿主机 Codex App / CLI 登录。没有配置 AI 时，普通阅读、编辑、保存和批注功能仍可正常使用。
 
 ## 作品库结构
 
@@ -43,8 +51,9 @@
 - `审查报告/`：保存章节审查结果，比如节奏、冲突、设定一致性问题。
 - `记忆库/current/`：当前投影，只保存写下一章最需要知道的当前状态。
 - `记忆库/index/`：章节、角色、伏笔、地点、设定的索引。
-- `记忆库/snapshots/`：每 5 章左右生成一次阶段摘要。
+- `记忆库/snapshots/`：只在完整篇纲结束时生成篇末摘要。
 - `档案库/`：保存完整历史档案，比如角色历史、伏笔历史、地点历史、设定历史、事实历史。
+- `.history/`：网页每次实际保存变更前保留上一版，每份文档最多 30 个唯一版本；不会进入检索或写作上下文。
 
 ## 第一步：创建一本新小说
 
@@ -70,7 +79,7 @@
 
 ```text
 请使用 webnovel-writer Skill，读取当前小说的大纲/原始大纲.md。
-先不要写正文，请帮我整理出 总纲.md、第一卷.md、章节规划.md，并初始化 current 投影和索引。
+先不要写正文，请帮我整理出 总纲.md、按章节范围命名的第01篇_篇名.md、章节规划.md，并初始化 current 投影和索引。
 ```
 
 Codex 应该先读取 `小说项目/projects.json`，确认当前选中的是哪一本小说，然后只在这本小说目录里操作。
@@ -81,7 +90,7 @@ Codex 应该先读取 `小说项目/projects.json`，确认当前选中的是哪
 
 ```text
 请使用 webnovel-writer Skill，开始写第 1 章。
-先生成本章上下文包，再写正文；写完后审查、修改、保存正文，并生成章节 commit 和 memory_patch。
+先生成本章写作任务书，再写正文；写完后审查、修改、保存正文，并生成绑定 revision 的章节提交、schema v2 memory_patch 和最终化 manifest。
 ```
 
 写第 1 章时，Codex 不应该读取全部历史，因为此时还没有章节历史。它应该主要读取当前小说的大纲、写作规范和 current 投影。
@@ -117,7 +126,7 @@ Codex 每次写章都要遵守这个顺序：
 12. 生成 memory_patch。
 13. 更新 current 投影。
 
-章节检查使用 S1-S4 严重度：S1 是硬性失败，S2 是必须修改，S3 是建议修改，S4 是轻微润色。去 AI 味先只生成报告，不自动大段改写正文。
+章节检查使用 S1-S4 严重度：S1 是硬性失败，S2 是必须修改，二者都会返回失败码；S3 是建议修改，S4 是轻微润色。去 AI 味先只生成报告，不自动大段改写正文。审查报告、章节提交和 memory patch 必须记录同一正文 SHA-256；正文改动后旧产物会显示 stale。
 
 ## 辅助脚本
 
@@ -139,13 +148,13 @@ python .agents\skills\webnovel-writer\scripts\check_chapter.py --chapter 1
 
 作用：检查正文是否在 2000-2500 字之间，章节号是否匹配，是否泄漏“本章、细纲、读者、伏笔”等写作工程词，以及是否有明显 AI 腔、重复段落和标点问题。
 
-## 第六步：每 5 章做一次压缩摘要
+## 第六步：只在篇末压缩摘要
 
-写完第 5 章、第 10 章、第 15 章时，对 Codex 说：
+完成某个篇纲声明的完整章节范围后，对 Codex 说：
 
 ```text
-请使用 webnovel-writer Skill，对当前小说最近 5 章进行阶段压缩摘要。
-不要删除正文，把阶段摘要保存到 snapshots，并根据需要压缩 current 投影、更新索引和档案库。
+请使用 webnovel-writer Skill，对当前小说刚完成的完整篇章生成篇末摘要。
+不要删除正文，把篇末摘要保存到 snapshots，并根据需要压缩 current 投影、更新索引和档案库。
 ```
 
 压缩摘要的目的不是丢掉历史，而是让写后续章节时不用反复读取太多旧正文。
@@ -163,8 +172,12 @@ python .agents\skills\webnovel-writer\scripts\check_chapter.py --chapter 1
 - `PUT /api/document?projectId=...&path=...`：保存 Markdown 文件。
 - `DELETE /api/document?projectId=...&path=...`：把 Markdown 文件移入 `.trash/`。
 - `GET /api/search?projectId=...&q=...`：搜索当前小说标题、路径和正文内容。
+- `GET /api/workflow/status`、`POST /api/workflow/actions`：读取创作进度并执行受限安全动作。
+- `GET/POST /api/versions`：列出、对比和按 `expectedRevision` 恢复文档版本。
+- `GET/POST /api/trash`：列出和恢复当前作品的回收站文件；同名冲突返回 409。
+- `POST /api/export?type=markdown|zip`：导出整书 Markdown 或当前作品完整 ZIP 备份。
 
-API 会限制读写范围，不能访问当前小说目录之外的文件。
+文档和批注保存都要求 `expectedRevision`；并发冲突统一返回 409。API 只接受本机 Host/Origin，请求体上限 2 MiB，并拒绝路径穿越与符号链接逃逸。
 
 ## 注意
 

@@ -68,17 +68,21 @@ describe("整章体检核心", () => {
     ]));
   });
 
-  it("按章节装配固定上下文，不读取旧上下文包，且总预算不超过 32000 字符", async () => {
+  it("按章节装配固定上下文，连续读取最多五章完整前文并记录 revision", async () => {
     const root = await createProjectRoot();
-    await write(root, "大纲/细纲_第002章.md", `# 细纲 第002章\n${"纲".repeat(7000)}`);
-    await write(root, "记忆库/current/本章写作任务书.md", `# 第002章 本章写作任务书\n${"任".repeat(6000)}`);
+    await write(root, "大纲/细纲_第007章.md", `# 细纲 第007章\n${"纲".repeat(7000)}`);
+    await write(root, "记忆库/current/本章写作任务书.md", `# 第007章 本章写作任务书\n${"任".repeat(6000)}`);
     await write(root, "记忆库/current/本章上下文包.md", "这是不应被读取的旧文件");
-    await write(root, "正文/第001章_上一章.md", `# 第001章\n${"前".repeat(6000)}`);
+    for (let chapter = 1; chapter <= 6; chapter += 1) {
+      await write(root, `正文/第${String(chapter).padStart(3, "0")}章_前文.md`, `# 第${String(chapter).padStart(3, "0")}章\n${String(chapter).repeat(6000)}`);
+    }
     await write(root, "写作规范/文风指南.md", `# 文风指南\n${"风".repeat(5000)}`);
-    const context = await assembleChapterReviewContext(root, "正文/第002章_当前章.md", `# 第002章\n${"正".repeat(13000)}`);
+    const context = await assembleChapterReviewContext(root, "正文/第007章_当前章.md", `# 第007章\n${"正".repeat(13000)}`);
     expect(context.blocks.map((item) => item.path)).not.toContain("记忆库/current/本章上下文包.md");
-    expect(context.blocks.map((item) => item.label)).toEqual(expect.arrayContaining(["当前草稿", "本章细纲", "本章写作任务书", "上一章正文", "文风指南"]));
-    expect(context.manifest.reduce((sum, item) => sum + item.characters, 0)).toBeLessThanOrEqual(32_000);
+    expect(context.blocks.filter((item) => item.label.startsWith("前置正文"))).toHaveLength(5);
+    expect(context.blocks.map((item) => item.label)).not.toContain("前置正文 第001章");
+    expect(context.blocks.find((item) => item.label === "前置正文 第002章")?.content.length).toBeGreaterThan(5000);
+    expect(context.manifest.filter((item) => !item.missing).every((item) => Boolean(item.revision))).toBe(true);
     expect(context.manifest.some((item) => item.truncated)).toBe(true);
   });
 

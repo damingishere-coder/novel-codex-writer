@@ -174,6 +174,7 @@ export interface ReviewContextManifestItem {
   characters: number;
   truncated: boolean;
   missing: boolean;
+  revision?: string;
 }
 
 export interface ChapterReviewRun {
@@ -208,7 +209,7 @@ export interface ReviewAnnotation {
 }
 
 export interface ReviewSession {
-  schemaVersion: 3;
+  schemaVersion: 4;
   projectId: string;
   documentPath: string;
   baseRevision: string;
@@ -216,7 +217,20 @@ export interface ReviewSession {
   annotations: ReviewAnnotation[];
   chapterReviewRuns: ChapterReviewRun[];
   updatedAt: string;
+  sessionRevision: string;
 }
+
+export type {
+  DocumentVersion,
+  TrashEntry,
+  VersionDiff,
+  VersionsResponse,
+  WorkflowArtifact,
+  WorkflowArtifactState,
+  WorkflowContextItem,
+  WorkflowState,
+  WorkflowStatus
+} from "../shared/api-contract";
 
 export type AiStreamEvent =
   | { type: "started"; annotationId: string; engine: AiEngine }

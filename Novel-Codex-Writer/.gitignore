@@ -24,3 +24,6 @@
 
 # 仅限本机的网页设置
 frontend/.local/
+
+# 本机启动进程状态与日志
+.runtime/
