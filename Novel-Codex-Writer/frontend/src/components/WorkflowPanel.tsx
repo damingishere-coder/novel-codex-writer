@@ -1,5 +1,5 @@
 import { CheckCircle2, CircleAlert, Clipboard, LoaderCircle, RefreshCw, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { WorkflowStatus } from "../types";
 
 interface WorkflowPanelProps {
@@ -8,6 +8,7 @@ interface WorkflowPanelProps {
   busy: boolean;
   onRefresh: () => void;
   onAction: (action: string, extra?: Record<string, unknown>) => Promise<void>;
+  onNotice: (message: string) => void;
 }
 
 const statusLabels = {
@@ -19,15 +20,24 @@ const statusLabels = {
   finalized: "已最终化"
 } as const;
 
-export function WorkflowPanel({ status, loading, busy, onRefresh, onAction }: WorkflowPanelProps) {
+export function WorkflowPanel({ status, loading, busy, onRefresh, onAction, onNotice }: WorkflowPanelProps) {
   const [selectedLegacyPatch, setSelectedLegacyPatch] = useState("");
+
+  useEffect(() => {
+    setSelectedLegacyPatch((current) => status?.legacyPatchChoices.includes(current) ? current : "");
+  }, [status?.chapter, status?.legacyPatchChoices]);
 
   async function copyForCodex() {
     if (!status) return;
     const sources = status.reviewContext.map((item) => `- ${item.role}: ${item.path} @ ${item.revision?.slice(0, 12) ?? "missing"}`).join("\n");
-    await navigator.clipboard.writeText(
-      `请使用 webnovel-writer Skill 继续第${String(status.chapter).padStart(3, "0")}章。\n当前建议：${status.recommendation}\n上下文清单：\n${sources}`
-    );
+    try {
+      await navigator.clipboard.writeText(
+        `请使用 webnovel-writer Skill 继续第${String(status.chapter).padStart(3, "0")}章。\n当前建议：${status.recommendation}\n上下文清单：\n${sources}`
+      );
+      onNotice("已复制给 Codex");
+    } catch (error) {
+      onNotice(error instanceof Error ? `复制失败：${error.message}` : "复制失败：浏览器未授权访问剪贴板");
+    }
   }
 
   if (loading) return <div className="surface-state"><LoaderCircle className="animate-spin" />正在诊断创作进度…</div>;
@@ -88,7 +98,7 @@ export function WorkflowPanel({ status, loading, busy, onRefresh, onAction }: Wo
         {patch?.status === "ready" && patch.path ? (
           <button className="primary-button" disabled={busy} onClick={() => onAction("apply_patch", { patchPath: patch.path, confirmed: true })}>应用已确认 patch</button>
         ) : null}
-        <button className="soft-button" onClick={() => void copyForCodex()}><Clipboard size={15} />复制给 Codex</button>
+        <button className="soft-button" disabled={busy} onClick={() => void copyForCodex()}><Clipboard size={15} />复制给 Codex</button>
       </div>
 
       <details className="workflow-context">

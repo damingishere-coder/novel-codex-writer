@@ -1,0 +1,13 @@
+{
+  "score": 54,
+  "grade": "D",
+  "tags": ["bloat", "god-component", "over-fit", "legacy", "fallback", "silent-except"],
+  "findings": [
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_common.py:61","text":"1376 行单文件同时承担项目注册与路径边界、篇纲解析、记忆记录解析、patch/schema 校验、最终化证据、索引构建与排序、legacy 迁移、事务提交/恢复和诊断；最大函数 diagnostics 1257-1376（120 行）、validate_patch 440-529（90 行）、apply_transaction 1170-1231（62 行），属于真实的 god-component 维护风险。"},
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_common.py:1170","text":"apply_transaction 仅在 1187-1208 读取 before_hash/创建备份，1210-1217 直接 os.replace；没有进程锁或提交前重新校验当前 hash。并发写入或恢复期间，另一进程的修改可能被静默覆盖，事务一致性假设为单写者。"},
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_common.py:959","text":"load_indexed_records 直接把索引中的 item['file'] 拼到 project_root，未调用 assert_project_path；parse_memory_file 在 344-377 已先 read_text，直到 relative_to 才可能抛错。被篡改的 memory_index 可导致项目边界外文件被读取，或暴露未包装的 ValueError。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_common.py:464","text":"共享核心同时保留 schema_version=1 到 legacy_unknown 的兼容路径、schema v2、旧/新 patch 分类文件回退（551-554），并在 1007-1081 承担旧记忆标记和旧任务书文本迁移；行为依赖旧格式与 sidecar 文件是否存在，legacy/fallback 逻辑已进入主路径。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_common.py:44","text":"FINALIZATION_MANIFEST_RE 仅在此处定义，仓库内未发现引用；属于已发布但未使用的死符号，增加协议维护噪声。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_common.py:1127","text":"事务清理在 1127、1166、1230-1231 使用 shutil.rmtree(..., ignore_errors=True)，清理失败无日志或返回信号；调用方可能报告事务已恢复/完成但残留 .transactions 目录。"}
+  ]
+}

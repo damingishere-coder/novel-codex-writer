@@ -3,23 +3,46 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch as mock_patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / ".agents" / "skills" / "webnovel-writer" / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
+from build_context import build_taskbook_metadata, chapter_plan_target, chapter_section  # noqa: E402
 from memory_common import (  # noqa: E402
     MemorySystemError,
+    apply_transaction,
+    chapter_finalization_status,
     index_path,
+    ensure_index,
+    inspect_transactions,
+    load_applied_patch_ledger,
+    load_finalization_manifest,
+    load_indexed_records,
+    load_patch,
+    load_patch_classifications,
+    load_review_proof,
+    memory_source_files,
+    normalize_chapter,
+    rank_index_records,
+    recover_transactions,
+    prepare_record_file_changes,
     render_record,
     select_arc_outline,
+    validate_patch,
+    validate_patch_source_revisions,
+    validate_transaction_targets,
 )
+from memory_paths import project_files  # noqa: E402
+from memory_transactions import _reclaim_lock  # noqa: E402
 
 
 def write(path: Path, content: str) -> None:
@@ -335,11 +358,15 @@ class MemoryWorkflowTests(unittest.TestCase):
             self.assertIn("新状态完整写入", current_after)
             self.assertNotIn("旧状态。", current_after)
             digest = hashlib.sha256(current_path.read_bytes()).hexdigest()
+            memory_index = project / "记忆库" / "index" / "memory_index.json"
+            self.assertTrue(memory_index.exists())
+            memory_index.unlink()
 
             second = run_script("update_memory.py", "--patch", str(patch_path), "--library-root", str(library))
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
             self.assertIn("幂等跳过", second.stdout)
             self.assertEqual(digest, hashlib.sha256(current_path.read_bytes()).hexdigest())
+            self.assertTrue(memory_index.exists())
 
             patch_two = {
                 "schema_version": 2,
@@ -367,6 +394,69 @@ class MemoryWorkflowTests(unittest.TestCase):
             invalid = run_script("update_memory.py", "--patch", str(invalid_path), "--library-root", str(library))
             self.assertEqual(invalid.returncode, 2)
             self.assertEqual(before, hashlib.sha256(current_path.read_bytes()).hexdigest())
+
+    def test_concurrent_update_processes_serialize_and_second_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            library, project = make_project(Path(temporary), [(1, 30)])
+            patch = {
+                "schema_version": 2,
+                "patch_id": "concurrent-migration-v1",
+                "kind": "migration",
+                "chapter": 1,
+                "chapter_revision": None,
+                "source_revisions": {},
+                "summary": "并发写入测试。",
+                "ending_state": "只允许生成一次结果。",
+                "operations": [
+                    {
+                        "action": "upsert",
+                        "record": {
+                            "id": "character-concurrent",
+                            "category": "character",
+                            "status": "active",
+                            "importance": "high",
+                            "valid_from": 1,
+                            "valid_to": None,
+                            "entities": ["并发角色"],
+                            "tags": ["并发"],
+                            "source_chapter": 1,
+                            "content": "并发结果只应存在一份。",
+                        },
+                    }
+                ],
+            }
+            patch_path = project / "章节提交" / "concurrent-patch.json"
+            write(patch_path, json.dumps(patch, ensure_ascii=False))
+            environment = os.environ.copy()
+            environment["PYTHONUTF8"] = "1"
+            command = [
+                sys.executable,
+                str(SCRIPTS_DIR / "update_memory.py"),
+                "--patch",
+                str(patch_path),
+                "--library-root",
+                str(library),
+            ]
+            processes = [
+                subprocess.Popen(
+                    command,
+                    cwd=str(REPO_ROOT),
+                    env=environment,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    encoding="utf-8",
+                )
+                for _ in range(2)
+            ]
+            results = [process.communicate(timeout=30) for process in processes]
+
+            self.assertEqual([process.returncode for process in processes], [0, 0], results)
+            combined_stdout = "\n".join(stdout for stdout, _ in results)
+            self.assertEqual(combined_stdout.count("幂等跳过"), 1, combined_stdout)
+            current = read(project / "记忆库" / "current" / "当前人物状态.md")
+            self.assertEqual(current.count("character-concurrent"), 1)
+            self.assertEqual(inspect_transactions(project), [])
 
     def test_query_rebuilds_index_only_in_memory(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -397,12 +487,47 @@ class MemoryWorkflowTests(unittest.TestCase):
             )
             self.assertEqual(query.returncode, 0, query.stdout + query.stderr)
             self.assertIn("character-linxu-career", query.stdout)
+            query_payload = json.loads(query.stdout)
+            self.assertEqual(query_payload["omitted_count"], len(query_payload["omitted_ids"]))
+            self.assertFalse(query_payload["omitted_truncated"])
             self.assertFalse(index_path(project).exists())
             rebuilt = run_script(
                 "query_memory.py", "--chapter", "1", "--entity", "林序", "--library-root", str(library)
             )
             self.assertEqual(rebuilt.returncode, 0, rebuilt.stdout + rebuilt.stderr)
             self.assertFalse(index_path(project).exists())
+
+    def test_query_refuses_pending_transaction_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            library, project = make_project(Path(temporary), [(1, 30)])
+            (project / "记忆库" / ".transactions" / "txn-pending").mkdir(parents=True)
+            query = run_script("query_memory.py", "--chapter", "1", "--library-root", str(library))
+            self.assertEqual(query.returncode, 2, query.stdout + query.stderr)
+            self.assertIn("未完成事务", query.stdout)
+
+    def test_query_limit_is_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            library, _project = make_project(Path(temporary), [(1, 30)])
+            query = run_script(
+                "query_memory.py", "--chapter", "1", "--limit", "101", "--library-root", str(library)
+            )
+            self.assertEqual(query.returncode, 2, query.stdout + query.stderr)
+            self.assertIn("1-100", query.stdout)
+
+    def test_taskbook_budget_has_a_hard_upper_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            library, _project = make_project(Path(temporary), [(1, 30)])
+            result = run_script(
+                "build_context.py",
+                "--chapter",
+                "1",
+                "--budget-chars",
+                "12001",
+                "--library-root",
+                str(library),
+            )
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertIn("不能高于 12000", result.stdout)
 
     def test_compaction_only_writes_snapshot_at_arc_end(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -433,6 +558,40 @@ class MemoryWorkflowTests(unittest.TestCase):
             self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
             self.assertTrue(snapshot.exists())
 
+    def test_schema2_candidate_without_fresh_manifest_is_not_a_completed_chapter(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            library, project = make_project(Path(temporary), [(1, 1)])
+            patch = {
+                "schema_version": 2,
+                "patch_id": "chapter-001-candidate",
+                "kind": "chapter_result",
+                "chapter": 1,
+                "chapter_revision": "0" * 64,
+                "source_revisions": {"正文/第001章_候选.md": "0" * 64},
+                "summary": "这只是尚未应用的候选摘要。",
+                "ending_state": "不应进入篇末摘要。",
+                "operations": [],
+            }
+            write(
+                project / "章节提交" / "memory_patch_第001章_chapter-001-candidate.md",
+                json.dumps(patch, ensure_ascii=False),
+            )
+            compacted = run_script(
+                "compact_memory.py", "--range", "001-001", "--library-root", str(library), "--dry-run"
+            )
+            self.assertEqual(compacted.returncode, 2, compacted.stdout + compacted.stderr)
+            self.assertIn("篇章尚未完成", compacted.stdout)
+
+    def test_compaction_refuses_pending_transaction(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            library, project = make_project(Path(temporary), [(1, 1)])
+            (project / "记忆库" / ".transactions" / "txn-pending").mkdir(parents=True)
+            before = tree_snapshot(project)
+            compacted = run_script("compact_memory.py", "--range", "001-001", "--library-root", str(library))
+            self.assertEqual(compacted.returncode, 2, compacted.stdout + compacted.stderr)
+            self.assertIn("事务、数据或 workflow 阻断", compacted.stdout)
+            self.assertEqual(before, tree_snapshot(project))
+
     def test_critical_over_budget_stops_without_truncation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             library, project = make_project(Path(temporary), [(1, 30)])
@@ -460,6 +619,27 @@ class MemoryWorkflowTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("超过预算", result.stdout)
             self.assertFalse((project / "记忆库" / "current" / "本章写作任务书.md").exists())
+
+    def test_taskbook_rejects_missing_change_column_and_external_outline_link(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            library, project = make_project(Path(temporary), [(1, 30)])
+            blueprint = write_blueprint(project, 1)
+            write(blueprint, read(blueprint).replace("必须产生的变化", "备注"))
+            missing_column = run_script("build_context.py", "--chapter", "1", "--library-root", str(library))
+            self.assertEqual(missing_column.returncode, 2, missing_column.stdout + missing_column.stderr)
+            self.assertIn("缺少“必须产生的变化”列", missing_column.stdout)
+
+            outside = Path(temporary) / "outside-outline.md"
+            write(outside, "# 项目外总纲\n")
+            total_outline = project / "大纲" / "总纲.md"
+            total_outline.unlink()
+            try:
+                os.symlink(outside, total_outline)
+            except OSError as exc:
+                self.skipTest(f"当前环境不能创建文件链接：{exc}")
+            linked = run_script("build_context.py", "--chapter", "1", "--library-root", str(library))
+            self.assertEqual(linked.returncode, 2, linked.stdout + linked.stderr)
+            self.assertIn("越出当前小说目录", linked.stdout)
 
     def test_legacy_migration_preserves_text_and_moves_context_to_trash(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -536,8 +716,11 @@ class MemoryWorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             library, project = make_project(Path(temporary), [(1, 30)])
             transaction, target, original = write_interrupted_transaction(project)
-            recovered = run_script("memory_doctor.py", "--library-root", str(library), "--recover")
+            recovered = run_script("memory_doctor.py", "--library-root", str(library), "--recover", "--json")
             self.assertEqual(recovered.returncode, 0, recovered.stdout + recovered.stderr)
+            recovered_payload = json.loads(recovered.stdout)
+            self.assertEqual(recovered_payload["pending_transactions"], [])
+            self.assertEqual(recovered_payload["recovered_transactions"], [transaction.name])
             self.assertEqual(read(target), original)
             self.assertFalse(transaction.exists())
 
@@ -550,6 +733,19 @@ class MemoryWorkflowTests(unittest.TestCase):
             self.assertIn("外部修改", conflicted.stdout)
             self.assertEqual(read(target), changed)
             self.assertTrue(transaction.exists())
+
+        with tempfile.TemporaryDirectory() as temporary:
+            library, project = make_project(Path(temporary), [(1, 30)])
+            transaction, target, _ = write_interrupted_transaction(project)
+            manifest_path = transaction / "manifest.json"
+            payload = json.loads(read(manifest_path))
+            payload["files"][0]["backup"] = str(Path(temporary) / "outside-backup.md")
+            write(manifest_path, json.dumps(payload, ensure_ascii=False))
+            before = read(target)
+            rejected = run_script("memory_doctor.py", "--library-root", str(library), "--recover")
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn("事务备份", rejected.stdout)
+            self.assertEqual(read(target), before)
 
     def test_registered_project_and_output_boundaries(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -580,6 +776,31 @@ class MemoryWorkflowTests(unittest.TestCase):
             )
             self.assertEqual(escaped.returncode, 2)
             self.assertIn("越出当前小说目录", escaped.stdout)
+
+            overwrite_source = run_script(
+                "build_context.py",
+                "--chapter",
+                "1",
+                "--library-root",
+                str(library),
+                "--output",
+                str(project / "大纲" / "总纲.md"),
+            )
+            self.assertEqual(overwrite_source.returncode, 2)
+            self.assertIn("只能写入规范路径", overwrite_source.stdout)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            library, _project = make_project(Path(temporary), [(1, 30)])
+            projects_root = library / "作品"
+            outside_projects = Path(temporary) / "outside-projects"
+            projects_root.rename(outside_projects)
+            try:
+                os.symlink(outside_projects, projects_root, target_is_directory=True)
+            except OSError as exc:
+                self.skipTest(f"当前环境不能创建作品目录链接：{exc}")
+            rejected = run_script("query_memory.py", "--chapter", "1", "--library-root", str(library))
+            self.assertEqual(rejected.returncode, 2, rejected.stdout + rejected.stderr)
+            self.assertIn("作品目录不能是符号链接或 junction", rejected.stdout)
 
     def test_multiple_legacy_patches_require_explicit_classification(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -642,14 +863,39 @@ class MemoryWorkflowTests(unittest.TestCase):
             write(body, "# 第001章 测试正文\n\n正文版本一。\n")
             body_revision = hashlib.sha256(body.read_bytes()).hexdigest()
             review = project / "审查报告" / "第001章_审查报告.md"
+            review_proof = project / "审查报告" / "第001章_审查报告.review.json"
             commit = project / "章节提交" / "第001章_章节提交.md"
             write(review, f"# 第001章 审查报告\n\n- 正文 revision：`{body_revision}`\n- 结果：通过\n")
+            write(
+                review_proof,
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "kind": "chapter_review_proof",
+                        "chapter": 1,
+                        "document_path": "正文/第001章_测试正文.md",
+                        "document_revision": body_revision,
+                        "disk_revision": body_revision,
+                        "content_revision": body_revision,
+                        "run_id": "review-run-001",
+                        "status": "completed",
+                        "verdict": "pass",
+                        "blocking_findings": 0,
+                        "verification": {"required": 0, "resolved": 0, "unverified": 0},
+                        "findings_digest": "0" * 64,
+                        "context_revisions": {"正文/第001章_测试正文.md": body_revision},
+                        "prompt_version": "chapter-audit@v1 + finding-verify@v1",
+                    },
+                    ensure_ascii=False,
+                ),
+            )
             write(commit, f"# 第001章 章节提交\n\n- 正文 revision：`{body_revision}`\n")
             sources = [
                 body,
                 blueprint,
                 project / "记忆库" / "current" / "本章写作任务书.md",
                 review,
+                review_proof,
                 commit,
             ]
             patch = {
@@ -673,10 +919,491 @@ class MemoryWorkflowTests(unittest.TestCase):
             manifest = project / "章节提交" / "第001章_finalization.json"
             self.assertTrue(manifest.exists())
 
+            original_manifest = json.loads(read(manifest))
+            with mock_patch("memory_patch_schema.sha256_file", side_effect=PermissionError("locked")):
+                unreadable = chapter_finalization_status(project, 1)
+            self.assertEqual(unreadable["status"], "stale")
+            self.assertTrue(any("无法稳定读取" in reason for reason in unreadable["reasons"]))
+
+            tampered_manifest = dict(original_manifest)
+            tampered_manifest["patch_id"] = "chapter-001-repointed"
+            write(manifest, json.dumps(tampered_manifest, ensure_ascii=False))
+            repointed = run_script("memory_doctor.py", "--chapter", "2", "--library-root", str(library))
+            self.assertEqual(repointed.returncode, 2)
+            self.assertIn("FINALIZATION_STALE", repointed.stdout)
+            write(manifest, json.dumps(original_manifest, ensure_ascii=False))
+
             write(body, "# 第001章 测试正文\n\n正文版本二，旧审查不再有效。\n")
             stale = run_script("memory_doctor.py", "--chapter", "2", "--library-root", str(library))
             self.assertEqual(stale.returncode, 2)
             self.assertIn("FINALIZATION_STALE", stale.stdout)
+
+    def test_chapter_finalization_status_rejects_external_manifest_link(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _library, project = make_project(Path(temporary), [(1, 30)])
+            outside = Path(temporary) / "outside-finalization.json"
+            write(outside, json.dumps({"schema_version": 1}))
+            link = project / "章节提交" / "第001章_finalization.json"
+            try:
+                os.symlink(outside, link)
+            except OSError as exc:
+                self.skipTest(f"当前环境不能创建文件链接：{exc}")
+            with self.assertRaisesRegex(MemorySystemError, "不能是符号链接"):
+                chapter_finalization_status(project, 1)
+
+    def test_chapter_finalization_rejects_missing_partial_and_stale_review_proof(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            library, project = make_project(Path(temporary), [(1, 30)])
+            blueprint = write_blueprint(project, 1)
+            task = run_script("build_context.py", "--chapter", "1", "--library-root", str(library))
+            self.assertEqual(task.returncode, 0, task.stdout + task.stderr)
+            body = project / "正文" / "第001章_测试正文.md"
+            write(body, "# 第001章 测试正文\n\n正文版本一。\n")
+            body_revision = hashlib.sha256(body.read_bytes()).hexdigest()
+            review = project / "审查报告" / "第001章_审查报告.md"
+            proof = project / "审查报告" / "第001章_审查报告.review.json"
+            commit = project / "章节提交" / "第001章_章节提交.md"
+            write(review, f"# 第001章 审查报告\n\n- 正文 revision：`{body_revision}`\n- 结果：通过\n")
+            write(commit, f"# 第001章 章节提交\n\n- 正文 revision：`{body_revision}`\n")
+            base_sources = [
+                body,
+                blueprint,
+                project / "记忆库" / "current" / "本章写作任务书.md",
+                review,
+                commit,
+            ]
+
+            def make_patch(include_proof: bool = True) -> dict[str, object]:
+                sources = [*base_sources, *([proof] if include_proof else [])]
+                return {
+                    "schema_version": 2,
+                    "patch_id": "chapter-001-proof-test",
+                    "kind": "chapter_result",
+                    "chapter": 1,
+                    "chapter_revision": body_revision,
+                    "source_revisions": {
+                        path.relative_to(project).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+                        for path in sources
+                    },
+                    "summary": "第一章已完成。",
+                    "ending_state": "人物进入下一步行动。",
+                    "operations": [],
+                }
+
+            with self.assertRaisesRegex(MemorySystemError, "机器可读审阅证明"):
+                validate_patch_source_revisions(project, make_patch(False))
+
+            write(proof, "{}")
+            with self.assertRaisesRegex(MemorySystemError, "版本不受支持"):
+                validate_patch_source_revisions(project, make_patch())
+
+            for bad_value, expected_message in (
+                ({"status": "error", "verdict": "needs_changes", "blocking_findings": 0}, "未通过"),
+                ({"status": "completed", "verdict": "pass", "blocking_findings": 1}, "阻塞 finding"),
+                ({"status": "completed", "verdict": "pass", "blocking_findings": False}, "阻塞 finding"),
+                ({"status": "completed", "verdict": "pass", "blocking_findings": 0, "verification": {"required": True, "resolved": True, "unverified": False}}, "核验"),
+                ({"status": "completed", "verdict": "pass", "blocking_findings": 0, "document_revision": "0" * 64}, "revision 已过期"),
+                ({"context_revisions": {}}, "必须在 context_revisions"),
+                ({"context_revisions": {"正文/第001章_测试正文.md": body_revision, "大纲/未绑定.md": "0" * 64}}, "未绑定到 source_revisions"),
+            ):
+                payload = {
+                    "schema_version": 2,
+                    "kind": "chapter_review_proof",
+                    "chapter": 1,
+                    "document_path": "正文/第001章_测试正文.md",
+                    "document_revision": body_revision,
+                    "disk_revision": body_revision,
+                    "content_revision": body_revision,
+                    "run_id": "review-run-001",
+                    "status": "completed",
+                    "verdict": "pass",
+                    "blocking_findings": 0,
+                    "verification": {"required": 0, "resolved": 0, "unverified": 0},
+                    "findings_digest": "0" * 64,
+                    "context_revisions": {"正文/第001章_测试正文.md": body_revision},
+                    "prompt_version": "chapter-audit@v1 + finding-verify@v1",
+                    **bad_value,
+                }
+                write(proof, json.dumps(payload, ensure_ascii=False))
+                with self.assertRaisesRegex(MemorySystemError, expected_message):
+                    validate_patch_source_revisions(project, make_patch())
+
+    def test_memory_scan_rejects_symlink_or_junction_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _library, project = make_project(Path(temporary), [(1, 30)])
+            outside = Path(temporary) / "outside"
+            outside.mkdir()
+            write(outside / "sentinel.md", "项目外哨兵。")
+            link = project / "档案库" / "外部资料"
+            try:
+                os.symlink(outside, link, target_is_directory=True)
+            except OSError as exc:
+                self.skipTest(f"当前环境不能创建目录链接：{exc}")
+            with self.assertRaisesRegex(MemorySystemError, "档案库路径越出当前小说目录"):
+                memory_source_files(project)
+
+    def test_memory_doctor_migration_rejects_external_file_link(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            library, project = make_project(Path(temporary), [(1, 30)])
+            outside = Path(temporary) / "outside.md"
+            write(outside, "项目外哨兵。")
+            link = project / "记忆库" / "current" / "外部资料.md"
+            try:
+                os.symlink(outside, link)
+            except OSError as exc:
+                self.skipTest(f"当前环境不能创建文件链接：{exc}")
+            migrated = run_script(
+                "memory_doctor.py", "--library-root", str(library), "--migrate-legacy", "--dry-run"
+            )
+            self.assertEqual(migrated.returncode, 2, migrated.stdout + migrated.stderr)
+            self.assertIn("越出当前小说目录", migrated.stdout)
+
+    def test_tampered_memory_index_cannot_read_outside_project(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _library, project = make_project(Path(temporary), [(1, 30)])
+            outside = Path(temporary) / "outside.md"
+            write(outside, "项目外哨兵。")
+            with self.assertRaisesRegex(MemorySystemError, "索引来源越出当前小说目录"):
+                load_indexed_records(project, [{"id": "outside-record", "file": "../../outside.md"}])
+
+    def test_non_object_memory_index_is_rebuilt_instead_of_crashing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _library, project = make_project(Path(temporary), [(1, 30)])
+            target = index_path(project)
+            write(target, "[]")
+            rebuilt = ensure_index(project)
+            self.assertIsInstance(rebuilt, dict)
+            self.assertEqual(rebuilt["schema_version"], 2)
+
+            rebuilt["records"] = ["damaged"]
+            write(target, json.dumps(rebuilt, ensure_ascii=False))
+            repaired = ensure_index(project)
+            self.assertTrue(all(isinstance(item, dict) for item in repaired["records"]))
+            with self.assertRaisesRegex(MemorySystemError, "结构损坏"):
+                rank_index_records({**repaired, "records": [None]}, 1)
+
+            repaired["records"] = [{"id": "broken", "file": "记忆库/current/当前人物状态.md", "entities": None, "tags": []}]
+            write(target, json.dumps(repaired, ensure_ascii=False))
+            self.assertEqual(ensure_index(project)["records"], [])
+
+            repaired["schema_version"] = 2.0
+            write(target, json.dumps(repaired, ensure_ascii=False))
+            self.assertIs(type(ensure_index(project)["schema_version"]), int)
+
+            repaired["schema_version"] = 2
+            repaired["records"] = [{"id": "broken", "file": ".", "entities": [], "tags": []}]
+            write(target, json.dumps(repaired, ensure_ascii=False))
+            self.assertEqual(ensure_index(project)["records"], [])
+
+    def test_memory_index_rejects_external_index_directory_link(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _library, project = make_project(Path(temporary), [(1, 30)])
+            index_dir = project / "记忆库" / "index"
+            index_dir.rmdir()
+            outside = Path(temporary) / "outside-index"
+            outside.mkdir()
+            try:
+                os.symlink(outside, index_dir, target_is_directory=True)
+            except OSError as exc:
+                self.skipTest(f"当前环境不能创建目录链接：{exc}")
+            with self.assertRaisesRegex(MemorySystemError, "记忆索引目录不能是符号链接或 junction"):
+                ensure_index(project)
+
+    def test_memory_index_rejects_a_link_at_the_index_file_leaf(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _library, project = make_project(Path(temporary), [(1, 30)])
+            outside = Path(temporary) / "outside-index.json"
+            write(outside, "{}")
+            leaf = project / "记忆库" / "index" / "memory_index.json"
+            try:
+                os.symlink(outside, leaf)
+            except OSError as exc:
+                self.skipTest(f"当前环境不能创建索引文件链接：{exc}")
+            with self.assertRaisesRegex(MemorySystemError, "记忆索引不能是符号链接或 junction"):
+                ensure_index(project)
+
+    def test_transaction_manifest_must_be_json_object(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _library, project = make_project(Path(temporary), [(1, 30)])
+            transaction = project / "记忆库" / ".transactions" / "txn-invalid"
+            write(transaction / "manifest.json", "[]")
+            with self.assertRaisesRegex(MemorySystemError, "顶层必须是对象"):
+                inspect_transactions(project)
+
+    def test_taskbook_source_and_chapter_selection_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _library, project = make_project(Path(temporary), [(1, 30)])
+            with self.assertRaisesRegex(MemorySystemError, "必需来源不存在"):
+                build_taskbook_metadata(project, 1, [project / "大纲" / "missing.md"], "ready", "任务书")
+            with self.assertRaisesRegex(MemorySystemError, "重复标题"):
+                chapter_section("# 第001章 A\n\nA\n\n# 第001章 B\n\nB\n", 1)
+            with self.assertRaisesRegex(MemorySystemError, "多个候选"):
+                chapter_plan_target("- 第001章：A\n- 第001章：B\n", 1)
+
+    def test_taskbook_requires_canonical_blueprint_and_required_sections(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            library, project = make_project(Path(temporary), [(1, 30)])
+            blueprint = write_blueprint(project, 1)
+            legacy = project / "大纲" / "第1章_细纲.md"
+            blueprint.rename(legacy)
+            noncanonical = run_script("build_context.py", "--chapter", "1", "--library-root", str(library))
+            self.assertEqual(noncanonical.returncode, 2, noncanonical.stdout + noncanonical.stderr)
+            self.assertIn("必须唯一且使用规范路径", noncanonical.stdout)
+
+            legacy.rename(blueprint)
+            write(blueprint, read(blueprint).replace("## 本章目标\n\n- 推进一个明确目标。\n\n", ""))
+            missing_section = run_script("build_context.py", "--chapter", "1", "--library-root", str(library))
+            self.assertEqual(missing_section.returncode, 2, missing_section.stdout + missing_section.stderr)
+            self.assertIn("缺少非空的“本章目标”", missing_section.stdout)
+
+            write_blueprint(project, 1)
+            write(blueprint, read(blueprint).replace("- 推进一个明确目标。", "- "))
+            empty_list_item = run_script("build_context.py", "--chapter", "1", "--library-root", str(library))
+            self.assertEqual(empty_list_item.returncode, 2, empty_list_item.stdout + empty_list_item.stderr)
+            self.assertIn("缺少非空的“本章目标”", empty_list_item.stdout)
+
+            write_blueprint(project, 1)
+            write(blueprint, read(blueprint).replace("> 新问题出现。", ">"))
+            empty_quote = run_script("build_context.py", "--chapter", "1", "--library-root", str(library))
+            self.assertEqual(empty_quote.returncode, 2, empty_quote.stdout + empty_quote.stderr)
+            self.assertIn("缺少非空的“结尾钩子”", empty_quote.stdout)
+
+            scan_target = project / "不是目录"
+            write(scan_target, "普通文件")
+            with self.assertRaisesRegex(MemorySystemError, "不是目录"):
+                project_files(project, scan_target, "*.md", recursive=True, label="测试扫描路径")
+
+    def test_transaction_recovery_rejects_invalid_file_record(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _library, project = make_project(Path(temporary), [(1, 30)])
+            transaction = project / "记忆库" / ".transactions" / "txn-invalid-target"
+            write(
+                transaction / "manifest.json",
+                json.dumps({
+                    "status": "writing",
+                    "files": [{"target": "", "backup": "backup/0.bak", "had_original": False}],
+                }),
+            )
+            with self.assertRaisesRegex(MemorySystemError, "有效 target"):
+                recover_transactions(project, force_legacy=True)
+
+    def test_transaction_root_file_and_staging_failure_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _library, project = make_project(Path(temporary), [(1, 30)])
+            transaction_root = project / "记忆库" / ".transactions"
+            write(transaction_root, "普通文件占位")
+            with self.assertRaisesRegex(MemorySystemError, "普通文件占用"):
+                inspect_transactions(project)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            _library, project = make_project(Path(temporary), [(1, 30)])
+            target = project / "记忆库" / "current" / "当前人物状态.md"
+            write(target, "原始内容")
+            with mock_patch("memory_transactions.shutil.copy2", side_effect=OSError("staging failed")):
+                with self.assertRaisesRegex(OSError, "staging failed"):
+                    apply_transaction(project, {target: "新内容"})
+            transaction_root = project / "记忆库" / ".transactions"
+            self.assertTrue(transaction_root.is_dir())
+            self.assertEqual(list(transaction_root.iterdir()), [])
+            self.assertEqual(read(target), "原始内容")
+
+    def test_transaction_rejects_linked_target_without_touching_external_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _library, project = make_project(Path(temporary), [(1, 30)])
+            outside = Path(temporary) / "outside-transaction.md"
+            write(outside, "外部哨兵内容")
+            target = project / "记忆库" / "current" / "当前人物状态.md"
+            target.unlink(missing_ok=True)
+            try:
+                os.symlink(outside, target)
+            except OSError as exc:
+                self.skipTest(f"当前环境不能创建文件链接：{exc}")
+            with self.assertRaisesRegex(MemorySystemError, "不能经过符号链接"):
+                apply_transaction(project, {target: "越界内容"})
+            self.assertEqual(outside.read_text(encoding="utf-8"), "外部哨兵内容")
+
+    def test_dry_run_transaction_preflight_rejects_directory_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _library, project = make_project(Path(temporary), [(1, 30)])
+            target = project / "章节提交" / "memory_patch_第001章_dry-run.md"
+            target.mkdir(parents=True)
+            with self.assertRaisesRegex(MemorySystemError, "不是普通文件"):
+                validate_transaction_targets(project, {target: "候选内容"})
+
+    def test_memory_doctor_reports_non_file_legacy_input_stably(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            library, project = make_project(Path(temporary), [(1, 30)])
+            invalid = project / "档案库" / "事实历史" / "不可违背事实.md"
+            invalid.mkdir(parents=True)
+            result = run_script(
+                "memory_doctor.py",
+                "--library-root",
+                str(library),
+                "--migrate-legacy",
+                "--dry-run",
+            )
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertIn("不是普通文件", result.stdout)
+
+    def test_released_lock_owned_by_live_process_is_not_reclaimed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            lock_file = Path(temporary) / "project-write.lock"
+            write(lock_file, json.dumps({
+                "owner": f"{os.getpid()}-live",
+                "pid": os.getpid(),
+                "host": socket.gethostname(),
+                "released": True,
+            }))
+            old = 60.0
+            stat = lock_file.stat()
+            os.utime(lock_file, (stat.st_atime - old, stat.st_mtime - old))
+            self.assertFalse(_reclaim_lock(lock_file, stale_seconds=0.01))
+            self.assertTrue(lock_file.exists())
+
+    def test_chapter_number_parser_rejects_partial_or_negative_values(self) -> None:
+        for value in ("-1", "1.5", "chapter-001", "第1章附录"):
+            with self.subTest(value=value), self.assertRaises(MemorySystemError):
+                normalize_chapter(value)
+        self.assertEqual(normalize_chapter("第001章"), (1, "001"))
+
+    def test_patch_schema_version_rejects_boolean_or_float(self) -> None:
+        for schema_version in (True, 1.0):
+            patch = {
+                "schema_version": schema_version,
+                "patch_id": "chapter-001-invalid-schema",
+                "chapter": 1,
+                "summary": "摘要",
+                "ending_state": "状态",
+                "operations": [],
+            }
+            with self.subTest(schema_version=schema_version), self.assertRaisesRegex(MemorySystemError, "schema_version"):
+                validate_patch(patch)
+
+    def test_patch_source_revisions_reject_normalized_duplicates_and_internal_links(self) -> None:
+        duplicate = {
+            "schema_version": 2,
+            "patch_id": "migration-duplicate-paths",
+            "kind": "migration",
+            "chapter": 1,
+            "chapter_revision": None,
+            "source_revisions": {"大纲\\来源.md": "0" * 64, "大纲/来源.md": "1" * 64},
+            "summary": "迁移",
+            "ending_state": "完成",
+            "operations": [],
+        }
+        with self.assertRaisesRegex(MemorySystemError, "重复的规范路径"):
+            validate_patch(duplicate)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            _library, project = make_project(Path(temporary), [(1, 30)])
+            source = project / "大纲" / "真实来源.md"
+            alias = project / "大纲" / "链接来源.md"
+            write(source, "真实来源")
+            try:
+                os.symlink(source, alias)
+            except OSError as exc:
+                self.skipTest(f"当前环境不能创建文件链接：{exc}")
+            patch = validate_patch({
+                "schema_version": 2,
+                "patch_id": "migration-linked-source",
+                "kind": "migration",
+                "chapter": 1,
+                "chapter_revision": None,
+                "source_revisions": {"大纲/链接来源.md": hashlib.sha256(source.read_bytes()).hexdigest()},
+                "summary": "迁移",
+                "ending_state": "完成",
+                "operations": [],
+            })
+            with self.assertRaisesRegex(MemorySystemError, "不能经过符号链接"):
+                validate_patch_source_revisions(project, patch)
+
+    def test_persisted_schema_versions_reject_boolean_or_float(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _library, project = make_project(Path(temporary), [(1, 30)])
+            ledger_path = project / "章节提交" / "applied_patches.json"
+            classifications_path = project / "章节提交" / "patch_classifications.json"
+            proof_path = project / "审查报告" / "第001章.review.json"
+            manifest_path = project / "章节提交" / "第001章_finalization.json"
+            for schema_version in (True, 1.0):
+                with self.subTest(loader="ledger", schema_version=schema_version):
+                    write(ledger_path, json.dumps({"schema_version": schema_version, "patches": {}}))
+                    with self.assertRaisesRegex(MemorySystemError, "格式无效"):
+                        load_applied_patch_ledger(project)
+                with self.subTest(loader="classifications", schema_version=schema_version):
+                    write(classifications_path, json.dumps({"schema_version": schema_version, "classifications": {}}))
+                    with self.assertRaisesRegex(MemorySystemError, "格式不正确"):
+                        load_patch_classifications(project)
+                with self.subTest(loader="review", schema_version=schema_version):
+                    write(proof_path, json.dumps({"schema_version": schema_version}))
+                    with self.assertRaisesRegex(MemorySystemError, "版本不受支持"):
+                        load_review_proof(proof_path)
+                with self.subTest(loader="manifest", schema_version=schema_version):
+                    write(manifest_path, json.dumps({"schema_version": schema_version}))
+                    with self.assertRaisesRegex(MemorySystemError, "版本不受支持"):
+                        load_finalization_manifest(manifest_path)
+
+    def test_record_change_builder_rejects_external_target_link(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _library, project = make_project(Path(temporary), [(1, 30)])
+            outside = Path(temporary) / "outside-memory.md"
+            write(outside, "外部哨兵内容")
+            target = project / "记忆库" / "current" / "当前人物状态.md"
+            try:
+                os.symlink(outside, target)
+            except OSError as exc:
+                self.skipTest(f"当前环境不能创建文件链接：{exc}")
+            with self.assertRaisesRegex(MemorySystemError, "越出当前小说目录"):
+                prepare_record_file_changes(project, {}, {target: ["新记录"]})
+            self.assertEqual(outside.read_text(encoding="utf-8"), "外部哨兵内容")
+
+    def test_query_rejects_external_patch_classification_link(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            library, project = make_project(Path(temporary), [(1, 30)])
+            outside = Path(temporary) / "outside-classification.json"
+            write(outside, json.dumps({"schema_version": 1, "classifications": {}}, ensure_ascii=False))
+            link = project / "章节提交" / "patch_classifications.json"
+            try:
+                os.symlink(outside, link)
+            except OSError as exc:
+                self.skipTest(f"当前环境不能创建文件链接：{exc}")
+            query = run_script("query_memory.py", "--chapter", "1", "--library-root", str(library))
+            self.assertEqual(query.returncode, 2, query.stdout + query.stderr)
+            self.assertIn("越出当前小说目录", query.stdout)
+
+    def test_dangling_ledger_and_classification_links_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _library, project = make_project(Path(temporary), [(1, 30)])
+            for name, loader, message in (
+                ("applied_patches.json", load_applied_patch_ledger, "符号链接"),
+                ("patch_classifications.json", load_patch_classifications, "符号链接"),
+            ):
+                link = project / "章节提交" / name
+                try:
+                    os.symlink(Path(temporary) / f"missing-{name}", link)
+                except OSError as exc:
+                    self.skipTest(f"当前环境不能创建文件链接：{exc}")
+                with self.subTest(name=name), self.assertRaisesRegex(MemorySystemError, message):
+                    loader(project)
+                link.unlink()
+
+    def test_persisted_memory_json_paths_must_be_regular_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _library, project = make_project(Path(temporary), [(1, 30)])
+            cases = (
+                (project / "章节提交" / "applied_patches.json", load_applied_patch_ledger),
+                (project / "章节提交" / "patch_classifications.json", load_patch_classifications),
+                (project / "记忆库" / "index" / "memory_index.json", ensure_index),
+            )
+            for target, loader in cases:
+                with self.subTest(path=target.name):
+                    target.mkdir()
+                    with self.assertRaisesRegex(MemorySystemError, "不是普通文件"):
+                        loader(project)
+                    target.rmdir()
+            patch_path = project / "章节提交" / "memory_patch_第001章.md"
+            patch_path.mkdir()
+            with self.assertRaisesRegex(MemorySystemError, "不是普通文件"):
+                load_patch(patch_path)
 
     def test_check_chapter_s2_always_returns_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -692,6 +1419,72 @@ class MemoryWorkflowTests(unittest.TestCase):
                 str(library),
             )
             self.assertEqual(result.returncode, 1)
+
+    def test_check_chapter_rejects_invalid_word_count_range(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            library, project = make_project(Path(temporary), [(1, 30)])
+            chapter = project / "正文" / "第001章_测试.md"
+            write(chapter, "# 第001章 测试\n\n正文。\n")
+            result = run_script(
+                "check_chapter.py",
+                str(chapter),
+                "--chapter",
+                "1",
+                "--min",
+                "3000",
+                "--max",
+                "1000",
+                "--library-root",
+                str(library),
+            )
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertIn("0 <= --min <= --max", result.stdout)
+
+    def test_check_chapter_rejects_duplicate_candidates_and_body_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            library, project = make_project(Path(temporary), [(1, 30)])
+            first = project / "正文" / "第001章_A.md"
+            second = project / "正文" / "第001章_B.md"
+            write(first, "# 第001章 A\n\n正文。\n")
+            write(second, "# 第001章 B\n\n正文。\n")
+            duplicate = run_script(
+                "check_chapter.py", "--chapter", "1", "--library-root", str(library)
+            )
+            self.assertEqual(duplicate.returncode, 2, duplicate.stdout + duplicate.stderr)
+            self.assertIn("存在多个正文文件", duplicate.stdout)
+
+            overwrite = run_script(
+                "check_chapter.py",
+                str(first),
+                "--chapter",
+                "1",
+                "--library-root",
+                str(library),
+                "--output",
+                str(first),
+            )
+            self.assertEqual(overwrite.returncode, 2, overwrite.stdout + overwrite.stderr)
+            self.assertIn("不能覆盖正文", overwrite.stdout)
+
+            outline = project / "大纲" / "第001章_细纲.md"
+            write(outline, "# 第001章 细纲\n")
+            wrong_input = run_script(
+                "check_chapter.py", str(outline), "--chapter", "1", "--library-root", str(library)
+            )
+            self.assertEqual(wrong_input.returncode, 2, wrong_input.stdout + wrong_input.stderr)
+            self.assertIn("正文 目录内", wrong_input.stdout)
+
+    def test_check_chapter_refuses_pending_transaction(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            library, project = make_project(Path(temporary), [(1, 30)])
+            chapter = project / "正文" / "第001章_测试.md"
+            write(chapter, "# 第001章 测试\n\n正文。\n")
+            (project / "记忆库" / ".transactions" / "txn-pending").mkdir(parents=True)
+            checked = run_script(
+                "check_chapter.py", str(chapter), "--chapter", "1", "--library-root", str(library)
+            )
+            self.assertEqual(checked.returncode, 2, checked.stdout + checked.stderr)
+            self.assertIn("未完成事务", checked.stdout)
 
 
 def read(path: Path) -> str:

@@ -1,0 +1,14 @@
+{
+  "score": 57,
+  "grade": "D",
+  "tags": ["fallback", "duplication", "over-fit", "silent-except"],
+  "findings": [
+    {"sev":"MED","loc":".github/workflows/ci.yml:31","text":"CI 仅执行 Python compileall 与根目录 tests（31-35）；frontend/package.json:9-10 虽提供 build/test，但工作流未运行 TypeScript 构建、Vitest、前端 lint 或覆盖率，运行交付链路存在未门禁分支。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/scripts/windows/start_native.ps1:75","text":"本机启动仅以 vite.cmd 是否存在决定是否 npm ci（75-84）；Docker Compose 与 Dockerfile 又复制同一 presence-only 检查（docker-compose.yml:13、frontend/Dockerfile:10），node_modules 目录/命名卷已存在但 lockfile 改变时可能继续使用陈旧依赖。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/start-docker.bat:75","text":"缺少本地 node 镜像时把跨项目的 ai-jobpilot-frontend:latest 直接 retag 为 novel-codex-node:22（75-79），否则拉取可变标签 node:22-alpine（82-90）；未校验镜像兼容性，存在运行陈旧或非本项目基础镜像的 fallback。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/docker-compose.yml:11","text":"固定 container_name 为 novel-codex-workbench，启动脚本又用同名容器执行 docker cp（start-docker.bat:54-55）；并行实例或残留同名容器会产生全局冲突，停止/凭据注入归属依赖硬编码名称。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/docker-compose.yml:17","text":"Compose 将整个项目以读写方式挂载到容器（.:/app），同时向容器传递多个 API 凭据环境变量（21-24）；这条开发路径可直接读取或改写真实小说、.env 与源代码，只适合受信任的本机容器边界，不能视为隔离部署。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/scripts/windows/start_native.ps1:87","text":"服务进程在 87-93 行先启动，状态文件到 102-109 行才写入；若状态序列化/写盘失败，脚本异常退出但 npm/Vite 子进程已存活，后续 stop-web 因无状态记录会在 stop_native.ps1:23-25 直接放弃回收，形成孤儿进程。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/scripts/windows/start_native.ps1:55","text":"损坏状态或进程解析异常在 55-57 行空 catch 中不记录，随后 58 行静默删除状态并重建；恢复意图有注释，但原始异常不可追踪，重复损坏时诊断信息会丢失。"}
+  ]
+}

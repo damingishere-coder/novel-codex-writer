@@ -1,0 +1,15 @@
+{
+  "score": 45,
+  "grade": "D",
+  "tags": ["fallback", "silent-except", "duplication"],
+  "findings": [
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/server/workflow-api.ts:284","text":"runWorkflowAction 的各动作直接调用 runPython，没有 in-flight 锁、幂等键或执行前后的 revision 重检（284-335）；并发 generate_taskbook/check_body/apply_patch/classify_patch 会同时读写相同产物，重复 apply 的检查与写入也不在同一临界区，可能交错覆盖记忆和状态文件。"},
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/server/workflow-api.ts:229","text":"状态初始值为 ready（229-231），但 body.status === missing 分支只改变推荐动作，不改变 state（244-246）；当细纲和任务书就绪而正文缺失时，API 仍返回 state=ready，且 memoryPatch 可能显示可应用，状态机对缺正文场景失真。"},
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/server/workflow-api.ts:149","text":"最终化 manifest 的 sources/patch 只要是 object 但缺少 path 或 revision 就在 156 行静默跳过，未校验 schemaVersion、chapter、status、完整来源集合或 patch 绑定；只要 patch_id 能选中结果，随后仍可在 163 行返回 finalized，可能把不完整 manifest 当成已最终化。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/server/workflow-api.ts:331","text":"apply_patch 调用 update_memory.py 时只传 --patch 和 --library-root，没有把已选的 input.projectRoot 作为 --current-dir 传入（331-333）；脚本默认按 projects.json 的 activeProjectId 解析项目，因此通过 projectId 选择非 active 作品时，绝对 patchPath 会被脚本按另一项目根校验并拒绝，动作无法完成。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/server/workflow-api.ts:212","text":"审查和章节提交的 revision 绑定只是对 Markdown 文本做 includes(bodyInfo.revision)，再配合通过文本正则判断结果（212-226）；没有结构化字段、精确来源校验或 artifact schema，任意包含当前 hash 的旧/手工文本都可能被标记为 ready。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/server/workflow-api.ts:284","text":"runPython 没有超时、取消或子进程清理；stdout/stderr 持续通过 output += 累积，只有进程 close 后才截取最后 20000 字符（284-292），挂起的 Python 会让请求永久等待，异常大量输出可造成内存增长。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/server/workflow-api.ts:52","text":"readJson 和 parsePatch 对所有读取、JSON 解析异常直接 catch 后返回 null（52-59、85-92）；调用方随后把损坏元数据/patch 当作缺失并使用 results[0]、legacy[0] 等 fallback（137-145），会隐藏持久化损坏并给出不完整但看似可继续的状态。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/server/workflow-api.ts:70","text":"任务书来源、最终化 manifest 来源和审阅上下文分别重复实现 path/revision 校验（70-80、149-163、168-193），且对 malformed source 的处理不一致；同一文件可在 workflow artifact 与 reviewContext 中得到不同的新鲜度结论，后续修复容易产生状态漂移。"}
+  ]
+}

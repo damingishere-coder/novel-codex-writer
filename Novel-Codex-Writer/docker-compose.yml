@@ -6,22 +6,45 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
-      args:
-        NODE_IMAGE: novel-codex-node:22
     container_name: novel-codex-workbench
     working_dir: /app/frontend
-    command: sh -c "if [ ! -x node_modules/.bin/vite ]; then npm ci --no-audit --prefer-offline; fi; npm run dev:docker"
     ports:
       - "127.0.0.1:5173:5173"
     volumes:
-      - .:/app
+      - ./frontend:/app/frontend:ro
       - frontend_node_modules:/app/frontend/node_modules
+      - ./.agents:/app/.agents:ro
+      - ./chapter-check-rules.json:/app/chapter-check-rules.json:ro
+      - ./.runtime:/app/.runtime
+      - ./小说项目:/app/小说项目
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       CHOKIDAR_USEPOLLING: "true"
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       CODEX_API_KEY: ${CODEX_API_KEY:-}
       AI_MOCK_MODE: ${AI_MOCK_MODE:-false}
+      NOVEL_API_TRUST_DOCKER_GATEWAY: "true"
+      NOVEL_API_TRUSTED_PROXIES: "172.30.250.1"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/api/projects').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 2s
+      timeout: 2s
+      retries: 90
+      start_period: 10s
+    networks:
+      - novel_local
 
 volumes:
   frontend_node_modules:
+
+networks:
+  novel_local:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.250.0/24
+          gateway: 172.30.250.1

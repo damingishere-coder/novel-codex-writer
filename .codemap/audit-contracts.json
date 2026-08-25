@@ -1,0 +1,12 @@
+{
+  "score": 66,
+  "grade": "C",
+  "tags": ["duplication", "dual-format", "legacy"],
+  "findings": [
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/src/types.ts:1","text":"src/types.ts 自行定义 GroupId、ProjectSummary、DocumentEntry、AI 与审阅模型（1-209）；后端又在 frontend/server/novel-library-plugin.ts:54-122 和 frontend/server/chapter-review.ts:7-72 重定义同一组 union/interface，而 shared/api-contract.ts:1-61 只覆盖工作流、版本和回收站。核心 JSON 载荷缺少统一的前后端编译约束，字段增删可能只在一侧通过。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/src/types.ts:235","text":"AiStreamEvent 和 ChapterReviewStreamEvent 只在客户端 235-243 定义；后端 frontend/server/novel-library-plugin.ts:1335-1378、1418-1489 直接构造 NDJSON 对象且未引用这些事件类型。新增或改名事件可以在后端编译通过而客户端 union 过期，线协议也没有由共享类型约束。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/frontend/shared/api-contract.ts:27","text":"WorkflowStatus.recommendedAction 使用普通 string（27），而服务端 workflow-api.ts:295-305 接收的 action 也为 string；当前已知动作是有限集合，但没有 Action union，拼写错误或新增动作不会在编译期暴露，状态/动作协议建模偏弱。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/frontend/src/types.ts:84","text":"客户端 AiEngine 只允许 deepseek/codex（84），但服务端 frontend/server/novel-library-plugin.ts:1326 仍接受旧 gpt 别名并归一化为 deepseek；客户端 AiSettings（101-111）也不表达服务端兼容的 includeChapterContext（119-121、1797-1805）。这是仍在运行的 legacy/dual-format 分支，但未在共享协议中显式版本化。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/frontend/shared/review-anchor.ts:1","text":"共享锚点工具在 1-5 重复实现行拆分、边界裁剪和换行归一化；客户端 src/lib/format.ts:68-80 与服务端 server/review-utils.ts:45-58 也各自复制同一套逻辑。未来调整空范围、反向范围或 CRLF 规则时，前后端可能产生不同的文本/锚点结果。"}
+  ]
+}

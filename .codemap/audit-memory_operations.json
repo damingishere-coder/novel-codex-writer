@@ -1,0 +1,10 @@
+{
+  "score": 56,
+  "grade": "D",
+  "tags": ["duplication", "over-fit", "legacy"],
+  "findings": [
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/compact_memory.py:166","text":"diagnostics 对损坏或缺失 manifest 的事务返回 severity=error，但 176 行只阻断 blocked；因此存在 missing_manifest/TRANSACTION_INVALID 时仍可能在 190-195 行调用 apply_transaction 并写入真实小说目录，事务恢复闸门不一致。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/update_memory.py:108","text":"update_memory.py 108-117 与 compact_memory.py 72-81 分别复制 removals/additions 到 changes 的聚合、读取、追加和删除逻辑；两处只在业务筛选上不同，重复的写入计划算法可能产生行为漂移。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_doctor.py:55","text":"--migrate-legacy 路径把 Markdown 标记迁移、故事重置阻断注入、旧上下文包回收和索引重建串在同一操作模块（55-100、133-145）；虽有显式开关、dry-run 和可恢复 trash 保护，但 legacy 兼容逻辑扩大了维护面。"}
+  ]
+}

@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
-import { extname, join, relative, resolve, sep } from "node:path";
-import { countReadableWords, createRevision } from "./review-utils";
+import { readdir, stat } from "node:fs/promises";
+import { extname, relative, resolve, sep } from "node:path";
+import { assertNoSymlinkEscape, collectFilesInside, readFileInside } from "./file-storage.ts";
+import { HttpError } from "./http-error.ts";
+import { recordOperation } from "./observability.ts";
+import { countReadableWords, createRevision } from "./review-utils.ts";
+import chapterCheckRules from "../../chapter-check-rules.json" with { type: "json" };
 
 export type ReviewSeverity = "S1" | "S2" | "S3" | "S4";
 export type ReviewFindingSource = "local" | "ai";
@@ -25,6 +29,7 @@ export type ReviewFindingCategory =
 export interface ReviewSourceRef {
   path: string;
   snippet: string;
+  revision?: string;
 }
 
 export interface ReviewFinding {
@@ -85,31 +90,14 @@ export interface VerificationSourceBundle {
   sources: ReviewSourceRef[];
 }
 
-const ENGINEERING_TERMS = [
-  "本章",
-  "细纲",
-  "章节蓝图",
-  "读者",
-  "伏笔",
-  "爽点",
-  "剧情推进",
-  "章节目标",
-  "人设",
-  "叙事节奏",
-  "结尾钩子"
-];
+const MAX_PREVIOUS_CHAPTER_CHARACTERS = 8_000;
+export const MAX_REVIEW_CONTEXT_CHARACTERS = 67_000;
+const MAX_CONTEXT_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_VERIFICATION_FILES_PER_ROOT = 500;
+const MAX_VERIFICATION_BYTES_PER_ROOT = 16 * 1024 * 1024;
 
-const AI_STYLE_PATTERNS = [
-  "空气仿佛凝固",
-  "全场死寂",
-  "倒吸一口凉气",
-  "嘴角微微上扬",
-  "眼神复杂",
-  "眸光一闪",
-  "心中一凛",
-  "淡淡道",
-  "意味深长"
-];
+const ENGINEERING_TERMS = chapterCheckRules.engineeringTerms;
+const AI_STYLE_PATTERNS = chapterCheckRules.aiStylePatterns;
 
 const CATEGORIES = new Set<ReviewFindingCategory>([
   "chapter_format",
@@ -165,23 +153,23 @@ function excerpt(value: string, max = 180) {
 export function runDeterministicChapterChecks(documentPath: string, content: string): ReviewFinding[] {
   const findings: ReviewFinding[] = [];
   const wordCount = countReadableWords(content);
-  if (wordCount < 2000) {
+  if (wordCount < chapterCheckRules.wordCount.minimum) {
     findings.push(finding({
       source: "local",
       severity: "S1",
       category: "chapter_format",
       title: "章节字数不足",
-      evidence: `当前约 ${wordCount} 字，低于最低要求 2000 字。`,
+      evidence: `当前约 ${wordCount} 字，低于最低要求 ${chapterCheckRules.wordCount.minimum} 字。`,
       impact: "低于项目硬性范围，不能视为合格章节。",
       fixSuggestion: "扩写有效冲突、选择、行动后果或承接信息，避免只补解释性内容。"
     }));
-  } else if (wordCount > 2500) {
+  } else if (wordCount > chapterCheckRules.wordCount.maximum) {
     findings.push(finding({
       source: "local",
       severity: "S1",
       category: "chapter_format",
       title: "章节字数超出",
-      evidence: `当前约 ${wordCount} 字，高于最高要求 2500 字。`,
+      evidence: `当前约 ${wordCount} 字，高于最高要求 ${chapterCheckRules.wordCount.maximum} 字。`,
       impact: "超过项目硬性范围，后续审查和提交记录会失真。",
       fixSuggestion: "压缩重复解释、弱冲突段落和不影响后续的闲笔。"
     }));
@@ -327,7 +315,22 @@ async function readContextFile(
     manifest.push({ path, role, characters: 0, truncated: false, missing: true });
     return null;
   }
-  const raw = await readFile(absolutePath, "utf8");
+  assertNoSymlinkEscape(projectRoot, absolutePath);
+  if ((await stat(absolutePath)).size > MAX_CONTEXT_FILE_BYTES) {
+    throw new Error(`${role} 超过 ${MAX_CONTEXT_FILE_BYTES} 字节安全上限：${path}`);
+  }
+  const raw = await readFileInside(projectRoot, absolutePath, "utf8");
+  if (!raw.trim()) {
+    manifest.push({
+      path,
+      role,
+      characters: 0,
+      truncated: false,
+      missing: true,
+      revision: createRevision(raw)
+    });
+    return null;
+  }
   const clipped = clipText(raw, maximum);
   manifest.push({
     path,
@@ -340,14 +343,27 @@ async function readContextFile(
   return { path, content: clipped.content };
 }
 
-async function findChapterFile(root: string, chapterNumber: number) {
+async function findChapterFile(projectRoot: string, root: string, chapterNumber: number) {
   if (!existsSync(root)) return null;
+  assertNoSymlinkEscape(projectRoot, root);
   const names = await readdir(root);
+  const matches: string[] = [];
   for (const name of names.sort((left, right) => left.localeCompare(right, "zh-CN"))) {
     if (extname(name).toLowerCase() !== ".md") continue;
-    if (extractChapterNumber(name) === chapterNumber) return resolve(root, name);
+    if (extractChapterNumber(name) === chapterNumber) {
+      const target = resolve(root, name);
+      assertNoSymlinkEscape(projectRoot, target);
+      matches.push(target);
+    }
   }
-  return null;
+  if (matches.length > 1) {
+    throw new HttpError(
+      409,
+      `第${String(chapterNumber).padStart(3, "0")}章存在多个 Markdown 文件，无法确定审阅上下文。`,
+      "CHAPTER_FILE_AMBIGUOUS"
+    );
+  }
+  return matches[0] ?? null;
 }
 
 export async function assembleChapterReviewContext(
@@ -355,6 +371,7 @@ export async function assembleChapterReviewContext(
   documentPath: string,
   content: string
 ): Promise<ChapterReviewContext> {
+  const started = performance.now();
   if (!documentPath.replace(/\\/g, "/").startsWith("正文/")) {
     throw new Error("整章体检只适用于“正文”目录中的章节文档。");
   }
@@ -382,15 +399,16 @@ export async function assembleChapterReviewContext(
       title: "正文超出整章审阅安全预算",
       evidence: `正文共有 ${content.length} 个字符，本次最多提交 12000 个字符。`,
       impact: "AI 无法看到完整正文，不能可靠地标记审查通过。",
-      fixSuggestion: "先按项目 2000—2500 字要求压缩正文，再重新体检。"
+      fixSuggestion: `先按项目 ${chapterCheckRules.wordCount.minimum}—${chapterCheckRules.wordCount.maximum} 字要求压缩正文，再重新体检。`
     }));
   }
 
   const outlineRoot = resolve(projectRoot, "大纲");
-  const outlineFile = await findChapterFile(outlineRoot, chapterNumber);
+  const outlineFile = await findChapterFile(projectRoot, outlineRoot, chapterNumber);
   if (outlineFile) {
     const value = await readContextFile(outlineFile, projectRoot, "本章细纲", 6_000, manifest);
     if (value) blocks.push({ label: "本章细纲", ...value });
+    else findings.push(contextMissingFinding(relative(projectRoot, outlineFile).split(sep).join("/"), "本章细纲"));
   } else {
     const expected = `大纲/细纲_第${String(chapterNumber).padStart(3, "0")}章.md`;
     manifest.push({ path: expected, role: "本章细纲", characters: 0, truncated: false, missing: true });
@@ -420,10 +438,11 @@ export async function assembleChapterReviewContext(
   const firstPreviousChapter = Math.max(1, chapterNumber - 5);
   for (let previousChapter = firstPreviousChapter; previousChapter < chapterNumber; previousChapter += 1) {
     const role = `前置正文 第${String(previousChapter).padStart(3, "0")}章`;
-    const previousFile = await findChapterFile(resolve(projectRoot, "正文"), previousChapter);
+    const previousFile = await findChapterFile(projectRoot, resolve(projectRoot, "正文"), previousChapter);
     if (previousFile) {
-      const value = await readContextFile(previousFile, projectRoot, role, Number.MAX_SAFE_INTEGER, manifest);
+      const value = await readContextFile(previousFile, projectRoot, role, MAX_PREVIOUS_CHAPTER_CHARACTERS, manifest);
       if (value) blocks.push({ label: role, ...value });
+      else findings.push(contextMissingFinding(relative(projectRoot, previousFile).split(sep).join("/"), role));
     } else {
       const expected = `正文/第${String(previousChapter).padStart(3, "0")}章_*.md`;
       manifest.push({ path: expected, role, characters: 0, truncated: false, missing: true });
@@ -435,6 +454,16 @@ export async function assembleChapterReviewContext(
   const style = await readContextFile(stylePath, projectRoot, "文风指南", 4_000, manifest);
   if (style) blocks.push({ label: "文风指南", ...style });
   else findings.push(contextMissingFinding("写作规范/文风指南.md", "文风指南", "S3"));
+
+  const contextCharacters = blocks.reduce((total, block) => total + block.content.length, 0);
+  if (contextCharacters > MAX_REVIEW_CONTEXT_CHARACTERS) {
+    throw new Error(`整章体检上下文超过 ${MAX_REVIEW_CONTEXT_CHARACTERS} 字符安全上限。`);
+  }
+  recordOperation("review_context", {
+    durationMs: performance.now() - started,
+    files: manifest.filter((item) => !item.missing).length,
+    characters: contextCharacters
+  });
 
   return { chapterNumber, documentPath, content, blocks, manifest, findings };
 }
@@ -455,7 +484,7 @@ export function buildChapterAuditPrompt(context: ChapterReviewContext) {
   const user = [
     `文件：${context.documentPath}`,
     `章节：第 ${String(context.chapterNumber).padStart(3, "0")} 章`,
-    ...context.blocks.map((block) => `\n<reference label="${block.label}" path="${block.path}">\n${addLineNumbers(block.label === "当前草稿" ? block.content : block.content)}\n</reference>`),
+    ...context.blocks.map((block) => `\n<reference label="${block.label}" path="${block.path}">\n${addLineNumbers(block.content)}\n</reference>`),
     "\n请先核对本章目标、不可违背事实和前章承接，再检查人物、时间线、设定、伏笔、节奏、文风、重复和追读动力。"
   ].join("\n");
   return { system, user, combined: `[SYSTEM RULES]\n${system}\n\n[USER MATERIAL]\n${user}` };
@@ -472,8 +501,8 @@ function stringValue(value: unknown, maximum: number) {
 function normalizeLocation(content: string, before: string, rawFrom: unknown, rawTo: unknown) {
   const lines = content.split(/\r?\n/);
   const fromLine = Number(rawFrom);
-  const toLine = Math.max(fromLine, Number(rawTo));
-  if (Number.isInteger(fromLine) && Number.isInteger(toLine) && fromLine >= 1 && toLine <= lines.length) {
+  const toLine = Number(rawTo);
+  if (Number.isInteger(fromLine) && Number.isInteger(toLine) && fromLine >= 1 && toLine >= fromLine && toLine <= lines.length) {
     if (lines.slice(fromLine - 1, toLine).join("\n") === before) return { fromLine, toLine, matched: true };
   }
   return { matched: false };
@@ -482,23 +511,47 @@ function normalizeLocation(content: string, before: string, rawFrom: unknown, ra
 export function parseChapterAudit(value: unknown, content: string) {
   if (!value || typeof value !== "object") throw new Error("AI 返回的整章审阅结果不是 JSON 对象。");
   const record = value as Record<string, unknown>;
-  const rawFindings = Array.isArray(record.findings) ? record.findings.slice(0, 12) : [];
+  const summary = stringValue(record.summary, 600);
+  if (!summary) throw new Error("AI 返回的整章审阅结果缺少有效 summary。");
+  if (!Array.isArray(record.findings)) throw new Error("AI 返回的整章审阅结果缺少 findings 列表。");
+  if (record.findings.length > 12) throw new Error("AI 返回的整章审阅结果超过 12 条 finding 上限。");
+  const rawFindings = record.findings;
   const findings: ReviewFinding[] = [];
-  for (const raw of rawFindings) {
-    if (!raw || typeof raw !== "object") continue;
+  for (let index = 0; index < rawFindings.length; index += 1) {
+    const raw = rawFindings[index];
+    if (!raw || typeof raw !== "object") throw new Error(`AI 返回的第 ${index + 1} 条 finding 不是 JSON 对象。`);
     const item = raw as Record<string, unknown>;
     const severity = item.severity;
     const category = item.category;
-    if (!(["S1", "S2", "S3", "S4"] as unknown[]).includes(severity) || typeof category !== "string" || !CATEGORIES.has(category as ReviewFindingCategory)) continue;
+    if (!(["S1", "S2", "S3", "S4"] as unknown[]).includes(severity)) {
+      throw new Error(`AI 返回的第 ${index + 1} 条 finding severity 无效。`);
+    }
+    if (typeof category !== "string" || !CATEGORIES.has(category as ReviewFindingCategory)) {
+      throw new Error(`AI 返回的第 ${index + 1} 条 finding category 无效。`);
+    }
     const title = stringValue(item.title, 120);
     const evidence = stringValue(item.evidence, 1000);
     const impact = stringValue(item.impact, 1000);
     const fixSuggestion = stringValue(item.fixSuggestion, 1200);
-    if (!title || !evidence || !impact || !fixSuggestion) continue;
+    if (!title || !evidence || !impact || !fixSuggestion) {
+      throw new Error(`AI 返回的第 ${index + 1} 条 finding 缺少标题、证据、影响或修法。`);
+    }
+    if (typeof item.verificationNeeded !== "boolean") {
+      throw new Error(`AI 返回的第 ${index + 1} 条 finding verificationNeeded 无效。`);
+    }
+    if (!Array.isArray(item.lookupTerms) || item.lookupTerms.length > 4 || item.lookupTerms.some((term) => typeof term !== "string" || !term.trim() || term.trim().length > 60)) {
+      throw new Error(`AI 返回的第 ${index + 1} 条 finding lookupTerms 无效。`);
+    }
     const before = stringValue(item.before, 3000);
+    if (!before) throw new Error(`AI 返回的第 ${index + 1} 条 finding 缺少精确原文。`);
     const location = normalizeLocation(content, before, item.fromLine, item.toLine);
+    if (!location.matched) throw new Error(`AI 返回的第 ${index + 1} 条 finding 原文或行号与送审正文不一致。`);
+    if (item.after !== null && typeof item.after !== "string") {
+      throw new Error(`AI 返回的第 ${index + 1} 条 finding after 必须是字符串或 null。`);
+    }
     const afterCandidate = typeof item.after === "string" ? item.after.trim() : "";
-    const rawAfter = afterCandidate.length <= 5000 ? afterCandidate : "";
+    if (afterCandidate.length > 5000) throw new Error(`AI 返回的第 ${index + 1} 条 finding 替换文本过长。`);
+    const rawAfter = afterCandidate;
     const verificationNeeded = item.verificationNeeded === true || (VERIFICATION_CATEGORIES.has(category as ReviewFindingCategory) && (severity === "S1" || severity === "S2"));
     const lookupTerms = Array.isArray(item.lookupTerms)
       ? item.lookupTerms.map((term) => stringValue(term, 60)).filter(Boolean).slice(0, 4)
@@ -508,8 +561,10 @@ export function parseChapterAudit(value: unknown, content: string) {
       severity: severity as ReviewSeverity,
       category: category as ReviewFindingCategory,
       title,
-      ...(location.matched ? { fromLine: location.fromLine, toLine: location.toLine, before } : {}),
-      ...(location.matched && rawAfter && rawAfter !== before ? { after: rawAfter } : {}),
+      fromLine: location.fromLine,
+      toLine: location.toLine,
+      before,
+      ...(rawAfter && rawAfter !== before ? { after: rawAfter } : {}),
       evidence,
       impact,
       fixSuggestion,
@@ -517,28 +572,32 @@ export function parseChapterAudit(value: unknown, content: string) {
       lookupTerms
     }));
   }
-  return { summary: stringValue(record.summary, 600) || "AI 已完成整章审阅。", findings };
+  return { summary, findings };
 }
 
 export function deduplicateFindings(findings: ReviewFinding[]) {
   const seen = new Set<string>();
   return findings.filter((item) => {
-    const key = `${item.category}:${(item.before || item.evidence).replace(/\s+/g, "").slice(0, 100)}`;
+    const key = [
+      item.category,
+      item.severity,
+      item.fromLine,
+      item.toLine,
+      item.title.trim(),
+      (item.before || item.evidence).replace(/\s+/g, "").slice(0, 100)
+    ].join(":");
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
 }
 
-async function collectMarkdownFiles(root: string): Promise<string[]> {
-  if (!existsSync(root)) return [];
-  const entries = await readdir(root, { withFileTypes: true });
-  const nested = await Promise.all(entries.map(async (entry) => {
-    const path = join(root, entry.name);
-    if (entry.isDirectory()) return collectMarkdownFiles(path);
-    return entry.isFile() && extname(entry.name).toLowerCase() === ".md" ? [path] : [];
-  }));
-  return nested.flat();
+async function collectMarkdownFiles(projectRoot: string, root: string): Promise<string[]> {
+  return collectFilesInside(projectRoot, root, {
+    maxFiles: MAX_VERIFICATION_FILES_PER_ROOT,
+    maxBytes: MAX_VERIFICATION_BYTES_PER_ROOT,
+    include: (path) => extname(path).toLowerCase() === ".md"
+  });
 }
 
 function sourceSnippet(content: string, term: string) {
@@ -553,19 +612,23 @@ export async function collectVerificationSources(
   findings: ReviewFinding[]
 ): Promise<VerificationSourceBundle[]> {
   const paths = [
-    ...(await collectMarkdownFiles(resolve(projectRoot, "记忆库", "current"))),
-    ...(await collectMarkdownFiles(resolve(projectRoot, "档案库"))),
-    ...(await collectMarkdownFiles(resolve(projectRoot, "大纲"))),
-    ...(await collectMarkdownFiles(resolve(projectRoot, "正文"))).filter((path) => {
+    ...(await collectMarkdownFiles(projectRoot, resolve(projectRoot, "记忆库", "current"))),
+    ...(await collectMarkdownFiles(projectRoot, resolve(projectRoot, "档案库"))),
+    ...(await collectMarkdownFiles(projectRoot, resolve(projectRoot, "大纲"))),
+    ...(await collectMarkdownFiles(projectRoot, resolve(projectRoot, "正文"))).filter((path) => {
       const number = extractChapterNumber(path);
       return number !== undefined && number < chapterNumber && number >= Math.max(1, chapterNumber - 5);
     })
   ].filter((path) => !/(?:^|[\\/])(?:\.trash|旧版[^\\/]*|[^\\/]*备份)(?:[\\/]|$)/i.test(path));
 
-  const documents = await Promise.all(paths.map(async (path) => ({
-    path: relative(projectRoot, path).split(sep).join("/"),
-    content: await readFile(path, "utf8")
-  })));
+  const documents = await Promise.all(paths.map(async (path) => {
+    const content = await readFileInside(projectRoot, path, "utf8");
+    return {
+      path: relative(projectRoot, path).split(sep).join("/"),
+      content,
+      revision: createRevision(content)
+    };
+  }));
 
   return findings.slice(0, 5).map((item) => {
     const matches: Array<ReviewSourceRef & { score: number }> = [];
@@ -578,7 +641,12 @@ export async function collectVerificationSources(
         score += document.path.includes(term) ? 20 : 5;
         if (!snippet) snippet = found;
       }
-      if (score && snippet) matches.push({ path: document.path, snippet: excerpt(snippet, 650), score });
+      if (score && snippet) matches.push({
+        path: document.path,
+        snippet: excerpt(snippet, 650),
+        revision: document.revision,
+        score
+      });
     }
     return {
       findingId: item.id,
@@ -595,8 +663,10 @@ export function buildVerificationPrompt(findings: ReviewFinding[], bundles: Veri
     "sourcePaths 只能使用输入中真实出现的路径。只输出严格 JSON。",
     "格式：{\"decisions\":[{\"findingId\":\"原ID\",\"decision\":\"confirmed\",\"reason\":\"依据\",\"sourcePaths\":[\"路径\"]}]}"
   ].join("\n");
-  const user = findings.map((item) => {
-    const bundle = bundles.find((candidate) => candidate.findingId === item.id);
+  const findingById = new Map(findings.map((item) => [item.id, item]));
+  const user = bundles.map((bundle) => {
+    const item = findingById.get(bundle.findingId);
+    if (!item) throw new Error(`二次核查来源引用了未知 finding：${bundle.findingId}`);
     const sources = bundle?.sources.length
       ? bundle.sources.map((source) => `<source path="${source.path}">${source.snippet}</source>`).join("\n")
       : "[没有检索到来源]";
@@ -605,31 +675,80 @@ export function buildVerificationPrompt(findings: ReviewFinding[], bundles: Veri
   return { system, user, combined: `[SYSTEM RULES]\n${system}\n\n[VERIFICATION MATERIAL]\n${user}` };
 }
 
+export async function assertVerificationSourcesCurrent(projectRoot: string, bundles: VerificationSourceBundle[]) {
+  const uniqueSources = new Map<string, string>();
+  for (const bundle of bundles) {
+    for (const source of bundle.sources) {
+      if (!source.revision) throw new HttpError(409, "二次核查来源缺少 revision，已拒绝接受旧证据。", "VERIFICATION_SOURCE_STALE");
+      const previous = uniqueSources.get(source.path);
+      if (previous && previous !== source.revision) {
+        throw new HttpError(409, "同一路径出现互相冲突的来源 revision。", "VERIFICATION_SOURCE_STALE");
+      }
+      uniqueSources.set(source.path, source.revision);
+    }
+  }
+  for (const [path, revision] of uniqueSources) {
+    const content = await readFileInside(projectRoot, resolve(projectRoot, path), "utf8");
+    if (createRevision(content) !== revision) {
+      throw new HttpError(409, `二次核查来源已变化：${path}`, "VERIFICATION_SOURCE_STALE");
+    }
+  }
+}
+
 export function applyVerification(value: unknown, findings: ReviewFinding[], bundles: VerificationSourceBundle[]) {
   if (!value || typeof value !== "object") throw new Error("AI 返回的二次核查结果不是 JSON 对象。");
-  const decisions = Array.isArray((value as Record<string, unknown>).decisions)
-    ? (value as Record<string, unknown>).decisions as unknown[]
-    : [];
+  const rawDecisions = (value as Record<string, unknown>).decisions;
+  if (!Array.isArray(rawDecisions)) throw new Error("AI 返回的二次核查结果缺少 decisions 列表。");
+  const decisions = rawDecisions as unknown[];
+  const verifiableIds = new Set(bundles.map((bundle) => bundle.findingId));
+  const pendingIds = new Set(findings
+    .filter((item) => item.verification === "pending" && verifiableIds.has(item.id))
+    .map((item) => item.id));
+  if (decisions.length !== pendingIds.size) throw new Error("AI 二次核查必须为每个待核查 finding 返回且只返回一条 decision。");
   const decisionMap = new Map<string, Record<string, unknown>>();
-  for (const decision of decisions) {
-    if (decision && typeof decision === "object" && typeof (decision as Record<string, unknown>).findingId === "string") {
-      decisionMap.set((decision as Record<string, unknown>).findingId as string, decision as Record<string, unknown>);
+  for (let index = 0; index < decisions.length; index += 1) {
+    const decision = decisions[index];
+    if (!decision || typeof decision !== "object") throw new Error(`AI 返回的第 ${index + 1} 条核查 decision 不是对象。`);
+    const item = decision as Record<string, unknown>;
+    const findingId = item.findingId;
+    if (typeof findingId !== "string" || !pendingIds.has(findingId)) throw new Error(`AI 返回的第 ${index + 1} 条核查 decision findingId 无效。`);
+    if (decisionMap.has(findingId)) throw new Error(`AI 二次核查重复返回 findingId：${findingId}`);
+    if (item.decision !== "confirmed" && item.decision !== "unsupported" && item.decision !== "unverified") {
+      throw new Error(`AI 返回的第 ${index + 1} 条核查 decision 枚举无效。`);
     }
+    if (!stringValue(item.reason, 1000)) throw new Error(`AI 返回的第 ${index + 1} 条核查 decision 缺少 reason。`);
+    if (!Array.isArray(item.sourcePaths) || item.sourcePaths.some((path) => typeof path !== "string")) {
+      throw new Error(`AI 返回的第 ${index + 1} 条核查 decision sourcePaths 无效。`);
+    }
+    decisionMap.set(findingId, item);
   }
 
   return findings.flatMap((item) => {
     if (item.verification !== "pending") return [item];
+    if (!verifiableIds.has(item.id)) {
+      return [{
+        ...item,
+        verification: "unverified" as const,
+        title: item.title.startsWith("待人工确认：") ? item.title : `待人工确认：${item.title}`,
+        sourceRefs: []
+      }];
+    }
     const decision = decisionMap.get(item.id);
     const bundle = bundles.find((candidate) => candidate.findingId === item.id);
-    if (decision?.decision === "unsupported") return [];
+    if (!decision) throw new Error(`AI 二次核查缺少 finding：${item.id}`);
+    const allowed = new Set(bundle?.sources.map((source) => source.path) ?? []);
+    const requested = decision.sourcePaths as string[];
+    if (requested.some((path) => !allowed.has(path))) throw new Error(`AI 二次核查引用了未提供的来源：${item.id}`);
+    if (decision.decision === "unsupported") {
+      if (requested.length === 0) throw new Error(`AI 二次核查排除 finding 时必须提供来源：${item.id}`);
+      return [];
+    }
     if (decision?.decision === "confirmed") {
-      const allowed = new Set(bundle?.sources.map((source) => source.path) ?? []);
-      const requested = Array.isArray(decision.sourcePaths) ? decision.sourcePaths.filter((path): path is string => typeof path === "string") : [];
-      return [{ ...item, verification: "confirmed" as const, sourceRefs: bundle?.sources.filter((source) => requested.length === 0 || (allowed.has(source.path) && requested.includes(source.path))) ?? [] }];
+      if (requested.length === 0) throw new Error(`AI 二次核查确认 finding 时必须提供来源：${item.id}`);
+      return [{ ...item, verification: "confirmed" as const, sourceRefs: bundle?.sources.filter((source) => requested.includes(source.path)) ?? [] }];
     }
     return [{
       ...item,
-      severity: "S3" as const,
       verification: "unverified" as const,
       title: item.title.startsWith("待人工确认：") ? item.title : `待人工确认：${item.title}`,
       sourceRefs: bundle?.sources ?? []
@@ -640,7 +759,6 @@ export function applyVerification(value: unknown, findings: ReviewFinding[], bun
 export function markUnverified(findings: ReviewFinding[], bundles: VerificationSourceBundle[] = []) {
   return findings.map((item) => item.verification !== "pending" ? item : ({
     ...item,
-    severity: "S3" as const,
     verification: "unverified" as const,
     title: item.title.startsWith("待人工确认：") ? item.title : `待人工确认：${item.title}`,
     sourceRefs: bundles.find((candidate) => candidate.findingId === item.id)?.sources ?? []
@@ -648,7 +766,10 @@ export function markUnverified(findings: ReviewFinding[], bundles: VerificationS
 }
 
 export function computeVerdict(findings: ReviewFinding[]) {
-  return findings.some((item) => (item.severity === "S1" || item.severity === "S2") && (item.status === "open" || item.status === "stale"))
+  return findings.some((item) =>
+    item.verification === "pending" || item.verification === "unverified" ||
+    (item.status === "open" || item.status === "stale") && (item.severity === "S1" || item.severity === "S2")
+  )
     ? "needs_changes" as const
     : "pass" as const;
 }
@@ -677,24 +798,32 @@ export function createReviewRun(input: {
 export function normalizeChapterReviewRun(value: unknown): ChapterReviewRun | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
-  if (typeof raw.id !== "string" || typeof raw.documentRevision !== "string") return null;
-  const normalizedFindings = Array.isArray(raw.findings)
-    ? raw.findings.map(normalizeStoredFinding).filter((item): item is ReviewFinding => Boolean(item)).slice(0, 100)
-    : [];
-  const status = raw.status === "completed" || raw.status === "error" || raw.status === "stale" ? raw.status : "running";
+  if (!stringValue(raw.id, 100) || !stringValue(raw.documentRevision, 128)) return null;
+  if (raw.engine !== "deepseek" && raw.engine !== "codex") return null;
+  if (raw.status !== "running" && raw.status !== "completed" && raw.status !== "error" && raw.status !== "stale") return null;
+  if (!Array.isArray(raw.findings) || raw.findings.length > 100) return null;
+  const normalizedFindings = raw.findings.map(normalizeStoredFinding);
+  if (normalizedFindings.some((item) => item === null)) return null;
+  const findings = normalizedFindings as ReviewFinding[];
+  if (new Set(findings.map((item) => item.id)).size !== findings.length) return null;
+  if (raw.contextManifest !== undefined && (!Array.isArray(raw.contextManifest) || raw.contextManifest.length > 50)) return null;
+  const normalizedManifest = Array.isArray(raw.contextManifest) ? raw.contextManifest.map(normalizeManifestItem) : [];
+  if (normalizedManifest.some((item) => item === null)) return null;
+  if (!stringValue(raw.summary, 1000) || !stringValue(raw.promptVersion, 120) || !stringValue(raw.createdAt, 100)) return null;
+  if (raw.completedAt !== undefined && !stringValue(raw.completedAt, 100)) return null;
+  if (raw.error !== undefined && typeof raw.error !== "string") return null;
+  const status = raw.status;
   return {
-    id: raw.id,
-    documentRevision: raw.documentRevision,
-    engine: raw.engine === "codex" ? "codex" : "deepseek",
+    id: stringValue(raw.id, 100),
+    documentRevision: stringValue(raw.documentRevision, 128),
+    engine: raw.engine,
     status,
-    verdict: status === "stale" ? "stale" : computeVerdict(normalizedFindings),
-    summary: stringValue(raw.summary, 1000) || "暂无整章审阅摘要。",
-    findings: normalizedFindings,
-    contextManifest: Array.isArray(raw.contextManifest)
-      ? raw.contextManifest.map(normalizeManifestItem).filter((item): item is ReviewContextManifestItem => Boolean(item)).slice(0, 50)
-      : [],
-    promptVersion: stringValue(raw.promptVersion, 120) || "legacy",
-    createdAt: typeof raw.createdAt === "string" ? raw.createdAt : new Date().toISOString(),
+    verdict: status === "stale" ? "stale" : status === "error" ? "needs_changes" : computeVerdict(findings),
+    summary: stringValue(raw.summary, 1000),
+    findings,
+    contextManifest: normalizedManifest as ReviewContextManifestItem[],
+    promptVersion: stringValue(raw.promptVersion, 120),
+    createdAt: stringValue(raw.createdAt, 100),
     ...(typeof raw.completedAt === "string" ? { completedAt: raw.completedAt } : {}),
     ...(typeof raw.error === "string" ? { error: raw.error.slice(0, 1000) } : {})
   };
@@ -703,29 +832,45 @@ export function normalizeChapterReviewRun(value: unknown): ChapterReviewRun | nu
 function normalizeStoredFinding(value: unknown): ReviewFinding | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
-  if (typeof raw.id !== "string" || typeof raw.title !== "string" || typeof raw.evidence !== "string") return null;
-  const severity = (["S1", "S2", "S3", "S4"] as unknown[]).includes(raw.severity) ? raw.severity as ReviewSeverity : "S3";
-  const category = typeof raw.category === "string" && CATEGORIES.has(raw.category as ReviewFindingCategory) ? raw.category as ReviewFindingCategory : "language";
-  const rawStatus = raw.status === "accepted" || raw.status === "dismissed" || raw.status === "stale" ? raw.status : "open";
+  if (!stringValue(raw.id, 100) || !stringValue(raw.title, 160) || !stringValue(raw.evidence, 1200)) return null;
+  if (raw.source !== "local" && raw.source !== "ai") return null;
+  if (raw.severity !== "S1" && raw.severity !== "S2" && raw.severity !== "S3" && raw.severity !== "S4") return null;
+  if (typeof raw.category !== "string" || !CATEGORIES.has(raw.category as ReviewFindingCategory)) return null;
+  if (raw.status !== "open" && raw.status !== "accepted" && raw.status !== "dismissed" && raw.status !== "stale") return null;
+  if (raw.verification !== "not_needed" && raw.verification !== "pending" && raw.verification !== "confirmed" && raw.verification !== "unsupported" && raw.verification !== "unverified") return null;
+  if (raw.fromLine !== undefined && (!Number.isInteger(raw.fromLine) || Number(raw.fromLine) < 1)) return null;
+  if (raw.toLine !== undefined && (!Number.isInteger(raw.toLine) || Number(raw.toLine) < 1)) return null;
+  if (Number.isInteger(raw.fromLine) && Number.isInteger(raw.toLine) && Number(raw.toLine) < Number(raw.fromLine)) return null;
+  if (raw.before !== undefined && typeof raw.before !== "string") return null;
+  if (raw.after !== undefined && typeof raw.after !== "string") return null;
+  const severity = raw.severity;
+  const category = raw.category as ReviewFindingCategory;
+  const rawStatus = raw.status;
   const dismissalReason = typeof raw.dismissalReason === "string" ? raw.dismissalReason.trim().slice(0, 500) : "";
   const status = rawStatus === "dismissed" && (severity === "S1" || severity === "S2") && !dismissalReason ? "open" : rawStatus;
-  const verification = raw.verification === "pending" || raw.verification === "confirmed" || raw.verification === "unsupported" || raw.verification === "unverified" ? raw.verification : "not_needed";
+  const lookupTerms = raw.lookupTerms === undefined ? [] : raw.lookupTerms;
+  if (!Array.isArray(lookupTerms) || lookupTerms.length > 4 || lookupTerms.some((item) => !stringValue(item, 120))) return null;
+  const rawSourceRefs = raw.sourceRefs === undefined ? [] : raw.sourceRefs;
+  if (!Array.isArray(rawSourceRefs) || rawSourceRefs.length > 4) return null;
+  const sourceRefs = rawSourceRefs.map(normalizeSourceRef);
+  if (sourceRefs.some((item) => item === null)) return null;
+  if (raw.verification === "confirmed" && (sourceRefs.length === 0 || sourceRefs.some((item) => !item?.revision))) return null;
   return {
-    id: raw.id,
-    source: raw.source === "local" ? "local" : "ai",
+    id: stringValue(raw.id, 100),
+    source: raw.source,
     severity,
     category,
-    title: raw.title.slice(0, 160),
+    title: stringValue(raw.title, 160),
     ...(Number.isInteger(raw.fromLine) ? { fromLine: raw.fromLine as number } : {}),
     ...(Number.isInteger(raw.toLine) ? { toLine: raw.toLine as number } : {}),
     ...(typeof raw.before === "string" ? { before: raw.before.slice(0, 3000) } : {}),
     ...(typeof raw.after === "string" ? { after: raw.after.slice(0, 5000) } : {}),
-    evidence: raw.evidence.slice(0, 1200),
+    evidence: stringValue(raw.evidence, 1200),
     impact: stringValue(raw.impact, 1200) || "可能影响阅读或连续性。",
     fixSuggestion: stringValue(raw.fixSuggestion, 1500) || "请结合原文做最小必要修改。",
-    verification,
-    lookupTerms: Array.isArray(raw.lookupTerms) ? raw.lookupTerms.filter((item): item is string => typeof item === "string").slice(0, 4) : [],
-    sourceRefs: Array.isArray(raw.sourceRefs) ? raw.sourceRefs.map(normalizeSourceRef).filter((item): item is ReviewSourceRef => Boolean(item)).slice(0, 4) : [],
+    verification: raw.verification,
+    lookupTerms: lookupTerms.map((item) => stringValue(item, 120)),
+    sourceRefs: sourceRefs as ReviewSourceRef[],
     status,
     ...(dismissalReason ? { dismissalReason } : {})
   };
@@ -734,20 +879,28 @@ function normalizeStoredFinding(value: unknown): ReviewFinding | null {
 function normalizeSourceRef(value: unknown): ReviewSourceRef | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
-  if (typeof raw.path !== "string" || typeof raw.snippet !== "string") return null;
-  return { path: raw.path.slice(0, 500), snippet: raw.snippet.slice(0, 800) };
+  if (!stringValue(raw.path, 500) || !stringValue(raw.snippet, 800)) return null;
+  if (raw.revision !== undefined && !stringValue(raw.revision, 128)) return null;
+  return {
+    path: stringValue(raw.path, 500),
+    snippet: stringValue(raw.snippet, 800),
+    ...(typeof raw.revision === "string" ? { revision: raw.revision.slice(0, 128) } : {})
+  };
 }
 
 function normalizeManifestItem(value: unknown): ReviewContextManifestItem | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
-  if (typeof raw.path !== "string" || typeof raw.role !== "string") return null;
+  if (!stringValue(raw.path, 500) || !stringValue(raw.role, 100)) return null;
+  if (!Number.isFinite(raw.characters) || Number(raw.characters) < 0) return null;
+  if (typeof raw.truncated !== "boolean" || typeof raw.missing !== "boolean") return null;
+  if (raw.revision !== undefined && !stringValue(raw.revision, 128)) return null;
   return {
-    path: raw.path.slice(0, 500),
-    role: raw.role.slice(0, 100),
-    characters: Number.isFinite(raw.characters) ? Math.max(0, Number(raw.characters)) : 0,
-    truncated: raw.truncated === true,
-    missing: raw.missing === true,
+    path: stringValue(raw.path, 500),
+    role: stringValue(raw.role, 100),
+    characters: Number(raw.characters),
+    truncated: raw.truncated,
+    missing: raw.missing,
     ...(typeof raw.revision === "string" ? { revision: raw.revision.slice(0, 128) } : {})
   };
 }

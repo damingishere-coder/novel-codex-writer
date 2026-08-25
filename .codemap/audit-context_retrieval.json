@@ -1,0 +1,13 @@
+{
+  "score": 58,
+  "grade": "D",
+  "tags": ["bloat", "over-fit", "fallback", "legacy"],
+  "findings": [
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/build_context.py:496","text":"--output 只通过 assert_project_path 做小说根目录边界检查，未限制到任务书目录；write_taskbook 84-93 会把任意项目内路径及其 .meta.json 交给 apply_transaction。误传正文或大纲路径即可在边界检查通过后覆盖真实小说文件。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/build_context.py:183","text":"table_change_atoms 在缺少“必须产生的变化”表头时捕获 ValueError 并返回空列表，调用链继续生成任务书；关键情节点变化会被静默省略，没有诊断或阻断信号。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/build_context.py:486","text":"598 行脚本且 main 跨 109 行，集中 CLI 参数、项目校验、工作流阻断、索引、篇纲解析、记忆排序、预算选择、任务书渲染、来源指纹和事务写入；职责跨度已形成明显 bloat，修改任一阶段都需触及同一编排函数。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/query_memory.py:38","text":"--limit 仅校验大于 0，没有上限；rank_index_records 按请求值返回，随后 load_indexed_records 读取完整记忆正文。调用者可请求任意大结果集，造成不可控的内存和终端输出增长。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/build_context.py:509","text":"build_context 调用 ensure_index 时使用默认 persist=True，会在生成任务书前隐式重建并持久化 memory_index.json；对比 query_memory.py:42-43 明确使用 persist=False，两个入口的读写职责边界不一致。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/build_context.py:104","text":"--max-section-chars 作为旧参数兼容并映射为总预算（113-121、590-591），属于有提示且拒绝与新参数并用的 bounded legacy shim，但仍保留双 CLI 语义。"}
+  ]
+}

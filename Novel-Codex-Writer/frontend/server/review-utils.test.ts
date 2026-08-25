@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   createLineAnchor,
   createRevision,
-  makeReviewContext,
+  getLineText,
   parseReviewReply,
   parseSuggestion,
+  replaceLineRange,
   readEnvValue,
   setEnvValue,
   safeSessionName
@@ -20,6 +21,7 @@ describe("服务端审校安全工具", () => {
     const name = safeSessionName("../../其他小说/秘密.md");
     expect(name).toMatch(/^[a-f0-9]{24}\.json$/);
     expect(name).not.toContain("..");
+    expect(safeSessionName("正文\\第001章.md")).toBe(safeSessionName("正文/第001章.md"));
   });
 
   it("只接受严格的结构化建议", () => {
@@ -44,28 +46,20 @@ describe("服务端审校安全工具", () => {
     });
   });
 
-  it("保留有效替换建议，并在建议格式错误时仍返回可读回答", () => {
+  it("保留有效替换建议，并严格拒绝建议结构损坏的回答", () => {
     const validSuggestion = { decision: "change", severity: "S4", category: "language", before: "旧", after: "新", rationale: "更清楚" };
     expect(parseReviewReply({ reply: "我把句子压缩了一些。", suggestion: validSuggestion }, "旧")?.suggestion).toEqual(validSuggestion);
-    expect(parseReviewReply({ reply: "这里有三个名字可选。", suggestion: { ...validSuggestion, before: "错位" } }, "旧")).toEqual({
-      reply: "这里有三个名字可选。",
-      suggestion: undefined
-    });
+    expect(parseReviewReply({ reply: "这里有三个名字可选。", suggestion: { ...validSuggestion, before: "错位" } }, "旧")).toBeNull();
   });
 
-  it("兼容旧版直接返回建议对象的格式", () => {
-    expect(parseReviewReply({ decision: "keep", severity: "S4", category: "language", before: "旧", after: "旧", rationale: "原文合适" }, "旧")).toEqual({
-      reply: "原文合适",
-      suggestion: { decision: "keep", severity: "S4", category: "language", before: "旧", after: "旧", rationale: "原文合适" }
-    });
+  it("拒绝已淘汰的顶层 suggestion 旧协议", () => {
+    expect(parseReviewReply({ decision: "keep", severity: "S4", category: "language", before: "旧", after: "旧", rationale: "原文合适" }, "旧")).toBeNull();
   });
 
-  it("超长文档只截取目标行附近上下文", () => {
-    const content = Array.from({ length: 300 }, (_, index) => `第${index + 1}行`).join("\n");
-    const context = makeReviewContext(content, 150, 150, 300);
-    expect(context.length).toBeLessThanOrEqual(300);
-    expect(context).toContain("第150行");
-    expect(context).not.toContain("第1行\n");
+  it("拒绝把过期行号静默夹到正文末尾", () => {
+    expect(() => createLineAnchor("第一行\n第二行", 3, 3)).toThrow(RangeError);
+    expect(() => getLineText("第一行\n第二行", 3, 3)).toThrow(RangeError);
+    expect(() => replaceLineRange("第一行\n第二行", 2, 3, "替换")).toThrow(RangeError);
   });
 
   it("更新本机密钥时保留其他环境配置且不会重复写入", () => {

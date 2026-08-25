@@ -14,22 +14,80 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  safety-and-smoke-tests:
-    name: Safety and smoke tests
+  full-validation:
+    name: Python, frontend, coverage, and E2E
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
+      - name: Install Python coverage provider
+        run: python -m pip install coverage==7.15.4
+
       - name: Compile Python sources
         run: python -m compileall -q .
 
-      - name: Run repository tests
-        run: python -m unittest discover -s tests -p "test_*.py" -v
+      - name: Run repository tests with coverage
+        run: coverage run --branch --source="Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts" -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Run memory workflow tests with coverage
+        run: coverage run --branch --append --source="Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts" -m unittest discover -s Novel-Codex-Writer/tests -p "test_*.py" -v
+
+      - name: Create Python coverage reports
+        run: |
+          coverage report --fail-under=30
+          coverage xml -o coverage-python.xml
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: Novel-Codex-Writer/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: Novel-Codex-Writer/frontend
+        run: npm ci --no-audit
+
+      - name: Run frontend tests with coverage
+        working-directory: Novel-Codex-Writer/frontend
+        run: npm run test:coverage
+
+      - name: Build frontend
+        working-directory: Novel-Codex-Writer/frontend
+        run: npm run build
+
+      - name: Audit runtime and build dependencies
+        id: npm-audit
+        working-directory: Novel-Codex-Writer/frontend
+        run: npm audit --audit-level=high --json > npm-audit.json
+
+      - name: Install Playwright Chromium
+        working-directory: Novel-Codex-Writer/frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run critical E2E flows
+        working-directory: Novel-Codex-Writer/frontend
+        run: npm run e2e
+
+      - name: Upload validation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-reports
+          if-no-files-found: warn
+          path: |
+            coverage-python.xml
+            Novel-Codex-Writer/frontend/coverage/
+            Novel-Codex-Writer/frontend/npm-audit.json
+            Novel-Codex-Writer/frontend/playwright-report/
+            Novel-Codex-Writer/frontend/test-results/

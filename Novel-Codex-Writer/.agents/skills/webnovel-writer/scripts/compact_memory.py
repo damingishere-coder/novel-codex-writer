@@ -6,26 +6,27 @@ from __future__ import annotations
 import argparse
 import re
 from collections import defaultdict
+from contextlib import nullcontext
 from pathlib import Path
 
 from memory_common import (
     ArcOutline,
     MemoryRecord,
     MemorySystemError,
-    append_record_to_text,
     apply_transaction,
     archive_path_for,
     diagnostics,
     discover_arc_outlines,
     load_all_records,
     load_patch_history,
-    read_text,
+    project_write_lock,
+    prepare_record_file_changes,
     rebuild_index,
     select_chapter_result_patches,
-    remove_record_blocks,
     render_record,
     resolve_library_root,
     resolve_project_root,
+    validate_transaction_targets,
 )
 
 
@@ -69,16 +70,7 @@ def prepare_archive_changes(
         additions[target].append(render_record(record.metadata, record.content))
         report.append(f"归档 {record.record_id} -> {target.relative_to(project_root).as_posix()}")
 
-    changes: dict[Path, str | None] = {}
-    for path, items in removals.items():
-        changes[path.resolve()] = remove_record_blocks(read_text(path), items)
-    for target, blocks in additions.items():
-        content = changes.get(target, read_text(target))
-        if not content.strip():
-            content = f"# {target.stem}\n"
-        for block in blocks:
-            content = append_record_to_text(content, block)
-        changes[target] = content
+    changes = prepare_record_file_changes(project_root, removals, additions)
     return changes, report
 
 
@@ -161,41 +153,48 @@ def main() -> int:
         start, end = parse_range(args.range)
         library_root = resolve_library_root(args.library_root)
         project_root = resolve_project_root(library_root, args.project_root)
-        arcs = discover_arc_outlines(project_root)
-        arc = exact_arc(arcs, start, end)
-        findings = diagnostics(project_root, end)
-        if arc is None:
-            print(f"章节范围 {start:03d}-{end:03d} 不是任何篇纲的完整范围。")
-            print("本次按非篇末诊断处理：不会归档、不会生成 snapshot。")
-            for finding in findings:
-                print(f"- [{finding['severity']}] {finding['code']}：{finding['message']}")
-            return 2 if any(item["severity"] in {"error", "blocked"} for item in findings) else 0
-
-        records = load_all_records(project_root)
-        patches = select_chapter_result_patches(load_patch_history(project_root))
-        if any(item["severity"] == "blocked" for item in findings):
-            raise MemorySystemError("当前存在 workflow blocker，不能生成篇末摘要。请先解决并关闭阻断记录。")
-        completed_chapters = {
-            int(patch["chapter"])
-            for patch in patches
-            if start <= int(patch["chapter"]) <= end
-        }
-        missing_chapters = [number for number in range(start, end + 1) if number not in completed_chapters]
-        if missing_chapters:
-            visible = "、".join(f"{number:03d}" for number in missing_chapters[:10])
-            suffix = f"，另有 {len(missing_chapters) - 10} 章" if len(missing_chapters) > 10 else ""
-            raise MemorySystemError(
-                f"篇章尚未完成：缺少第 {visible}{suffix} 章的结构化 memory_patch，不能生成篇末摘要。"
-            )
-        changes, report = prepare_archive_changes(project_root, records)
-        snapshot_path = project_root / "记忆库" / "snapshots" / f"第{start:03d}-{end:03d}章_篇末摘要.md"
-        changes[snapshot_path.resolve()] = snapshot_text(project_root, arc, patches, records)
-        if not args.dry_run:
-            apply_transaction(project_root, changes)
-            rebuild_index(project_root)
+        lock_context = nullcontext() if args.dry_run else project_write_lock(project_root)
+        with lock_context:
+            arcs = discover_arc_outlines(project_root)
+            arc = exact_arc(arcs, start, end)
             findings = diagnostics(project_root, end)
+            if arc is None:
+                print(f"章节范围 {start:03d}-{end:03d} 不是任何篇纲的完整范围。")
+                print("本次按非篇末诊断处理：不会归档、不会生成 snapshot。")
+                for finding in findings:
+                    print(f"- [{finding['severity']}] {finding['code']}：{finding['message']}")
+                return 2 if any(item["severity"] in {"error", "blocked"} for item in findings) else 0
+
+            if any(item["severity"] in {"error", "blocked"} for item in findings):
+                raise MemorySystemError("当前存在事务、数据或 workflow 阻断，不能生成篇末摘要。请先运行 memory_doctor.py 处理。")
+            records = load_all_records(project_root)
+            patches = select_chapter_result_patches(load_patch_history(project_root))
+            completed_chapters = {
+                int(patch["chapter"])
+                for patch in patches
+                if start <= int(patch["chapter"]) <= end
+            }
+            missing_chapters = [number for number in range(start, end + 1) if number not in completed_chapters]
+            if missing_chapters:
+                visible = "、".join(f"{number:03d}" for number in missing_chapters[:10])
+                suffix = f"，另有 {len(missing_chapters) - 10} 章" if len(missing_chapters) > 10 else ""
+                raise MemorySystemError(
+                    f"篇章尚未完成：缺少第 {visible}{suffix} 章的结构化 memory_patch，不能生成篇末摘要。"
+                )
+            changes, report = prepare_archive_changes(project_root, records)
+            snapshot_path = project_root / "记忆库" / "snapshots" / f"第{start:03d}-{end:03d}章_篇末摘要.md"
+            changes[snapshot_path.resolve()] = snapshot_text(project_root, arc, patches, records)
+            if args.dry_run:
+                validate_transaction_targets(project_root, changes)
+            else:
+                apply_transaction(project_root, changes)
+                rebuild_index(project_root)
+                findings = diagnostics(project_root, end)
     except MemorySystemError as exc:
         print(f"错误：{exc}")
+        return 2
+    except OSError:
+        print("错误：篇末压缩所需文件无法稳定读取或写入。")
         return 2
 
     print(f"小说目录：{project_root}")

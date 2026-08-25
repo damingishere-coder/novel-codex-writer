@@ -4,38 +4,42 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
-    "dev:docker": "vite --host 0.0.0.0",
+    "dev": "vite --host 127.0.0.1 --strictPort",
+    "dev:docker": "vite --host 0.0.0.0 --strictPort",
     "build": "tsc -b && vite build",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "preview": "vite preview --host 127.0.0.1",
-    "preview:docker": "vite preview --host 0.0.0.0"
+    "e2e": "playwright test",
+    "e2e:serve": "node e2e/prepare-e2e.mjs && vite --host 127.0.0.1 --port 4178 --strictPort",
+    "preview": "vite preview --host 127.0.0.1 --strictPort",
+    "preview:docker": "vite preview --host 0.0.0.0 --strictPort"
   },
   "dependencies": {
-    "@codemirror/lang-markdown": "^6.5.1",
     "@codemirror/commands": "^6.8.1",
+    "@codemirror/lang-markdown": "^6.5.1",
     "@codemirror/state": "^6.7.1",
     "@codemirror/view": "^6.43.6",
     "@openai/codex": "^0.144.6",
     "@tailwindcss/typography": "^0.5.16",
-    "@vitejs/plugin-react": "^4.3.4",
     "lucide-react": "^0.468.0",
-    "openai": "^6.48.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.1",
     "remark-gfm": "^4.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^6.1.0",
+    "@vitest/coverage-v8": "^4.1.10",
     "autoprefixer": "^10.4.20",
-    "postcss": "^8.4.49",
+    "postcss": "^8.5.26",
     "tailwindcss": "^3.4.16",
-    "typescript": "^5.7.2",
-    "vite": "^6.0.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2",
     "vitest": "^4.1.10"
   }
 }

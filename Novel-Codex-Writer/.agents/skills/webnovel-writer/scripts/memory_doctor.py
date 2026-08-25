@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
 
@@ -20,9 +21,12 @@ from memory_common import (
     diagnostics,
     inspect_transactions,
     normalize_chapter,
+    project_write_lock,
     read_text,
     rebuild_index,
     recover_transactions,
+    assert_project_path,
+    project_files,
     resolve_library_root,
     resolve_project_root,
     workflow_blocker_text,
@@ -47,8 +51,21 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def checked_optional_file(project_root: Path, candidate: Path, label: str) -> Path:
+    if candidate.is_symlink() or getattr(candidate, "is_junction", lambda: False)():
+        raise MemorySystemError(f"{label}不能是符号链接或 junction：{candidate}")
+    target = assert_project_path(project_root, candidate, label)
+    if target.exists() and not target.is_file():
+        raise MemorySystemError(f"{label}不是普通文件：{target}")
+    return target
+
+
 def active_hard_fact_path(project_root: Path) -> Path | None:
-    candidate = project_root / "档案库" / "事实历史" / "不可违背事实.md"
+    candidate = checked_optional_file(
+        project_root,
+        project_root / "档案库" / "事实历史" / "不可违背事实.md",
+        "不可违背事实路径",
+    )
     return candidate if candidate.exists() else None
 
 
@@ -58,7 +75,7 @@ def plan_migration(project_root: Path) -> tuple[dict[Path, str | None], int]:
     current_dir = project_root / "记忆库" / "current"
     candidates = [
         path
-        for path in current_dir.glob("*.md")
+        for path in project_files(project_root, current_dir, "*.md", label="旧记忆迁移路径")
         if path.name not in {LEGACY_CONTEXT_NAME, TASKBOOK_NAME, "写作状态.md"}
     ]
     hard_facts = active_hard_fact_path(project_root)
@@ -70,13 +87,19 @@ def plan_migration(project_root: Path) -> tuple[dict[Path, str | None], int]:
             changes[path.resolve()] = converted
             migrated_count += count
 
-    legacy_path = current_dir / LEGACY_CONTEXT_NAME
-    taskbook_path = current_dir / TASKBOOK_NAME
+    legacy_path = checked_optional_file(project_root, current_dir / LEGACY_CONTEXT_NAME, "旧上下文路径")
+    taskbook_path = checked_optional_file(project_root, current_dir / TASKBOOK_NAME, "任务书路径")
+    hard_fact_path = checked_optional_file(
+        project_root,
+        project_root / "档案库" / "事实历史" / "不可违背事实.md",
+        "不可违背事实路径",
+    )
+    timeline_path = checked_optional_file(project_root, current_dir / "当前时间线.md", "当前时间线路径")
     reset_evidence = "\n".join(
         (
             read_text(legacy_path),
-            read_text(project_root / "档案库" / "事实历史" / "不可违背事实.md"),
-            read_text(current_dir / "当前时间线.md"),
+            read_text(hard_fact_path),
+            read_text(timeline_path),
         )
     )
     needs_story_reset = (
@@ -84,7 +107,7 @@ def plan_migration(project_root: Path) -> tuple[dict[Path, str | None], int]:
         or "暂停生成正文" in reset_evidence
         or ("旧细纲" in reset_evidence and ("尚未重写" in reset_evidence or "不得用于生成" in reset_evidence))
     )
-    workflow_path = current_dir / "写作状态.md"
+    workflow_path = checked_optional_file(project_root, current_dir / "写作状态.md", "写作状态路径")
     workflow_content = read_text(workflow_path)
     if needs_story_reset and "workflow.story-reset" not in workflow_content:
         if workflow_content.strip():
@@ -101,12 +124,19 @@ def plan_migration(project_root: Path) -> tuple[dict[Path, str | None], int]:
 
 
 def trash_legacy_context(library_root: Path, project_root: Path) -> Path | None:
-    legacy_path = project_root / "记忆库" / "current" / LEGACY_CONTEXT_NAME
+    legacy_path = assert_project_path(
+        project_root,
+        project_root / "记忆库" / "current" / LEGACY_CONTEXT_NAME,
+        "旧上下文路径",
+    )
     if not legacy_path.exists():
         return None
     project_id = project_root.name
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    trash_root = (library_root / ".trash").resolve()
+    resolved_library = library_root.resolve()
+    trash_root = (resolved_library / ".trash").resolve()
+    if trash_root != resolved_library and resolved_library not in trash_root.parents:
+        raise MemorySystemError(f"回收站目录越出作品库：{trash_root}")
     target = (trash_root / project_id / timestamp / "记忆库" / "current" / LEGACY_CONTEXT_NAME).resolve()
     if trash_root not in target.parents:
         raise MemorySystemError(f"回收站目标无效：{target}")
@@ -120,38 +150,45 @@ def main() -> int:
         library_root = resolve_library_root(args.library_root)
         project_root = resolve_project_root(library_root, args.project_root)
         chapter = normalize_chapter(args.chapter)[0] if args.chapter else None
-        pending_before = inspect_transactions(project_root)
-        recovered: list[str] = []
-        if args.force_legacy_recovery and not args.recover:
-            raise MemorySystemError("--force-legacy-recovery 必须与 --recover 一起使用。")
-        if args.recover and not args.dry_run:
-            recovered = recover_transactions(project_root, force_legacy=args.force_legacy_recovery)
-        elif pending_before and (args.migrate_legacy or args.rebuild_index) and not args.dry_run:
-            raise MemorySystemError("存在未完成事务。请先运行 memory_doctor.py --recover，再执行写操作。")
-        migration_summary = None
-        trash_target = None
-        if args.migrate_legacy:
-            changes, migrated_count = plan_migration(project_root)
-            migration_summary = {
-                "records": migrated_count,
-                "files": [path.relative_to(project_root).as_posix() for path in changes],
-            }
-            if not args.dry_run and changes:
-                trash_target = trash_legacy_context(library_root, project_root)
-                apply_transaction(project_root, changes)
-        index_rebuilt = False
-        if (args.rebuild_index or (args.migrate_legacy and not args.dry_run)) and not args.dry_run:
-            rebuild_index(project_root)
-            index_rebuilt = True
-        findings = diagnostics(project_root, chapter)
+        mutates = not args.dry_run and (args.recover or args.migrate_legacy or args.rebuild_index)
+        lock_context = project_write_lock(project_root) if mutates else nullcontext()
+        with lock_context:
+            pending_before = inspect_transactions(project_root)
+            recovered: list[str] = []
+            if args.force_legacy_recovery and not args.recover:
+                raise MemorySystemError("--force-legacy-recovery 必须与 --recover 一起使用。")
+            if args.recover and not args.dry_run:
+                recovered = recover_transactions(project_root, force_legacy=args.force_legacy_recovery)
+            elif pending_before and (args.migrate_legacy or args.rebuild_index) and not args.dry_run:
+                raise MemorySystemError("存在未完成事务。请先运行 memory_doctor.py --recover，再执行写操作。")
+            migration_summary = None
+            trash_target = None
+            if args.migrate_legacy:
+                changes, migrated_count = plan_migration(project_root)
+                migration_summary = {
+                    "records": migrated_count,
+                    "files": [path.relative_to(project_root).as_posix() for path in changes],
+                }
+                if not args.dry_run and changes:
+                    trash_target = trash_legacy_context(library_root, project_root)
+                    apply_transaction(project_root, changes)
+            index_rebuilt = False
+            if (args.rebuild_index or (args.migrate_legacy and not args.dry_run)) and not args.dry_run:
+                rebuild_index(project_root)
+                index_rebuilt = True
+            findings = diagnostics(project_root, chapter)
+            pending_after = inspect_transactions(project_root)
     except MemorySystemError as exc:
         print(f"错误：{exc}")
+        return 2
+    except OSError:
+        print("错误：记忆诊断或迁移所需文件无法稳定读取或写入。")
         return 2
 
     result = {
         "project_root": str(project_root),
         "dry_run": args.dry_run,
-        "pending_transactions": pending_before,
+        "pending_transactions": pending_after,
         "recovery_planned": bool(args.recover and args.dry_run and pending_before),
         "recovered_transactions": recovered,
         "migration": migration_summary,

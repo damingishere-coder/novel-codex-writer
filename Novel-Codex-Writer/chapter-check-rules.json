@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "wordCount": {
+    "minimum": 2000,
+    "maximum": 2500
+  },
+  "engineeringTerms": [
+    "本章",
+    "细纲",
+    "章节蓝图",
+    "爽点",
+    "剧情推进",
+    "章节目标",
+    "叙事节奏",
+    "结尾钩子"
+  ],
+  "aiStylePatterns": [
+    "空气仿佛凝固",
+    "全场死寂",
+    "倒吸一口凉气",
+    "嘴角微微上扬",
+    "眼神复杂",
+    "眸光一闪",
+    "心中一凛",
+    "淡淡道",
+    "意味深长"
+  ],
+  "chapterNumberFixtures": [
+    {
+      "documentPath": "正文/第001章_标题.md",
+      "heading": "# 第002章 标题",
+      "pathChapter": 1,
+      "titleChapter": 2,
+      "expectsMismatch": true
+    },
+    {
+      "documentPath": "正文/draft.md",
+      "heading": "# 第012章 风雨夜",
+      "pathChapter": null,
+      "titleChapter": 12,
+      "expectsMismatch": false
+    },
+    {
+      "documentPath": "正文/第003章附录.md",
+      "heading": "# 无章节号标题",
+      "pathChapter": 3,
+      "titleChapter": null,
+      "expectsMismatch": false
+    }
+  ]
+}

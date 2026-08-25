@@ -1,0 +1,14 @@
+{
+  "score": 48,
+  "grade": "D",
+  "tags": ["god-component", "bloat", "fallback", "silent-except"],
+  "findings": [
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/server/novel-library-plugin.ts:292","text":"单文件承担 API 路由注册（292-463）、项目/文档/回收站/搜索/导出（633-1065）、审校会话（1085-1300）、AI Provider/Prompt/子进程解析（1311-1762）、AI 配置/密钥/错误响应（1788-1918），约 1918 行且包含 40+ 私有函数，已形成核心 god-component，修改和安全审查边界难以隔离。"},
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/server/novel-library-plugin.ts:669","text":"/api/library（313-317）进入 readGroupEntries 后仅 resolve(projectRoot, definition.root) 并递归 readdir/readFile（669-715），未执行 realpath 或 assertNoSymlinkEscape；若项目目录或分组根目录是 symlink/junction，可把库读取与搜索导向项目外文件，而显式文档路径才在 1031-1040 做该校验。"},
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/server/novel-library-plugin.ts:1311","text":"AI suggest 与整章 review 仅校验 body.projectId、documentPath、content 长度并做路径解析（1311-1326、1382-1400），随后直接把调用方提交的 body.content 交给 buildAiContext/Provider；没有当前文件 revision 或磁盘内容绑定，调用方可提交旧稿、跨项目正文或路径与正文不匹配的数据。"},
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/server/novel-library-plugin.ts:1657","text":"DeepSeek 错误消息和 Codex 原始 stderr 被拼入 HttpError 并返回（1657-1659、1719-1723）；sendError 的 redactErrorMessage 仅替换本机路径（1893-1909），没有 Provider/API key/token 内容脱敏，外部错误或 CLI 输出含敏感信息时会经 HTTP/NDJSON 暴露。"},
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/server/novel-library-plugin.ts:528","text":"expectedRevision 检查与写入不是原子操作：PUT 先读取并比较 revision（528-547），writeDocument 随后读取历史、保存版本再 atomicWriteFile（757-765），两个并发请求可同时通过同一 revision 检查并以后写覆盖先写，造成确认丢稿。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/server/novel-library-plugin.ts:1788","text":"loadAiSettings 捕获所有 JSON、读取和权限异常后静默返回默认配置（1788-1794），调用方无法区分配置损坏、权限故障与真实默认值，故障会被 fallback 隐藏并可能改变实际 Provider 行为。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/server/novel-library-plugin.ts:1707","text":"runCodex 在 120 秒超时期间无上限累积 stdout/stderr（1707-1714），子进程异常输出可持续增长内存；超时只停止子进程，未设置输出截断或大小阈值。"}
+  ]
+}

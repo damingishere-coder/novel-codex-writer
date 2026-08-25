@@ -10,12 +10,17 @@ from pathlib import Path
 from memory_common import (
     MemorySystemError,
     ensure_index,
+    inspect_transactions,
     load_indexed_records,
     normalize_chapter,
     rank_index_records,
     resolve_library_root,
     resolve_project_root,
+    source_hashes,
 )
+
+MAX_QUERY_LIMIT = 100
+MAX_OMITTED_IDS = 200
 
 
 def parse_args() -> argparse.Namespace:
@@ -35,10 +40,13 @@ def main() -> int:
     args = parse_args()
     try:
         chapter, _ = normalize_chapter(args.chapter)
-        if args.limit <= 0:
-            raise MemorySystemError("--limit 必须大于 0。")
+        if args.limit <= 0 or args.limit > MAX_QUERY_LIMIT:
+            raise MemorySystemError(f"--limit 必须在 1-{MAX_QUERY_LIMIT} 之间。")
         library_root = resolve_library_root(args.library_root)
         project_root = resolve_project_root(library_root, args.project_root)
+        if inspect_transactions(project_root):
+            raise MemorySystemError("存在未完成事务。请先运行 memory_doctor.py 诊断，并显式使用 --recover。")
+        before_hashes = source_hashes(project_root)
         # 查询必须是纯只读；索引缺失或过期时只在内存中重建。
         index = ensure_index(project_root, persist=False)
         selected_items, omitted_items = rank_index_records(
@@ -50,8 +58,13 @@ def main() -> int:
             limit=args.limit,
         )
         records = load_indexed_records(project_root, selected_items)
+        if inspect_transactions(project_root) or source_hashes(project_root) != before_hashes:
+            raise MemorySystemError("查询期间记忆来源发生变化，请重试以获得一致快照。")
     except MemorySystemError as exc:
         print(f"错误：{exc}")
+        return 2
+    except OSError:
+        print("错误：记忆查询所需文件无法稳定读取。")
         return 2
 
     results = []
@@ -71,13 +84,16 @@ def main() -> int:
         )
 
     if args.json:
+        omitted_ids = [item["id"] for item in omitted_items[:MAX_OMITTED_IDS]]
         print(
             json.dumps(
                 {
                     "chapter": chapter,
                     "count": len(results),
                     "records": results,
-                    "omitted_ids": [item["id"] for item in omitted_items],
+                    "omitted_ids": omitted_ids,
+                    "omitted_count": len(omitted_items),
+                    "omitted_truncated": len(omitted_items) > len(omitted_ids),
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -91,7 +107,9 @@ def main() -> int:
         print(item["content"])
         print(f"来源：{item['source']}:{item['line']}")
     if omitted_items:
-        print("\n未展开来源 ID：" + "、".join(str(item["id"]) for item in omitted_items))
+        visible = omitted_items[:MAX_OMITTED_IDS]
+        suffix = f"（另有 {len(omitted_items) - len(visible)} 条未显示）" if len(omitted_items) > len(visible) else ""
+        print("\n未展开来源 ID：" + "、".join(str(item["id"]) for item in visible) + suffix)
     return 0
 
 

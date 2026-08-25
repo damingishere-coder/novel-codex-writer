@@ -20,6 +20,7 @@ export interface ReviewProvider {
     user: string;
     combined: string;
     expectedBefore: string;
+    signal: AbortSignal;
   }): Promise<ReviewReply>;
   requestJson(input: {
     system: string;
@@ -27,5 +28,6 @@ export interface ReviewProvider {
     combined: string;
     schemaFile: string;
     maxTokens: number;
+    signal: AbortSignal;
   }): Promise<unknown>;
 }

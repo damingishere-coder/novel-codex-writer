@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Bot,
   Check,
@@ -20,12 +20,14 @@ import {
 } from "lucide-react";
 import type { AiEngine, AiStatus, ChapterReviewRun, ReviewAnnotation, ReviewFinding, ReviewSeverity } from "../types";
 import { cn } from "../lib/format";
+import { isAnnotationProcessable } from "../lib/review";
 
 interface ReviewPanelProps {
   annotations: ReviewAnnotation[];
   chapterReview?: ChapterReviewRun;
   isChapter: boolean;
   reviewBusy: boolean;
+  batchBusy: boolean;
   reviewMessage?: string;
   selectedId?: string;
   aiStatus?: AiStatus;
@@ -43,7 +45,7 @@ interface ReviewPanelProps {
   onAcceptFinding: (id: string) => void;
   onDismissFinding: (id: string) => void;
   onLocateFinding: (id: string) => void;
-  onExport: () => void;
+  onExport: () => void | Promise<void>;
 }
 
 const severityLabels: Record<ReviewSeverity, string> = {
@@ -67,12 +69,18 @@ const categoryLabels: Record<ReviewFinding["category"], string> = {
   language: "语言"
 };
 
+export function processableAnnotationCount(annotations: ReviewAnnotation[]) {
+  return annotations.filter(isAnnotationProcessable).length;
+}
+
 export function ReviewPanel(props: ReviewPanelProps) {
   const [engine, setEngine] = useState<AiEngine>(props.aiStatus?.settings.engine ?? "codex");
   const [severity, setSeverity] = useState<"all" | ReviewSeverity>("all");
+  const [exportBusy, setExportBusy] = useState(false);
+  const exportBusyRef = useRef(false);
   useEffect(() => setEngine(props.aiStatus?.settings.engine ?? "codex"), [props.aiStatus?.settings.engine]);
 
-  const pending = props.annotations.filter((item) => ["draft", "pending", "ready", "error", "stale"].includes(item.status)).length;
+  const pending = processableAnnotationCount(props.annotations);
   const findings = props.chapterReview?.findings ?? [];
   const visibleFindings = severity === "all" ? findings : findings.filter((item) => item.severity === severity);
   const canExport = Boolean(props.annotations.length || props.chapterReview);
@@ -106,8 +114,27 @@ export function ReviewPanel(props: ReviewPanelProps) {
       {props.chapterReview ? <ReviewSummary run={props.chapterReview} /> : null}
 
       <div className="review-actions">
-        <button className="soft-button" onClick={props.onProcessAll} disabled={!pending}><Sparkles size={14} />处理划线批注</button>
-        <button className="icon-button" onClick={props.onExport} title="导出审阅报告" disabled={!canExport}><Download size={15} /></button>
+        <button className="soft-button" onClick={props.onProcessAll} disabled={!pending || props.batchBusy}>
+          {props.batchBusy ? <LoaderCircle size={14} className="animate-spin" /> : <Sparkles size={14} />}
+          {props.batchBusy ? "处理中" : "处理划线批注"}
+        </button>
+        <button
+          className="icon-button"
+          onClick={async () => {
+            if (exportBusyRef.current) return;
+            exportBusyRef.current = true;
+            setExportBusy(true);
+            try {
+              await props.onExport();
+            } finally {
+              exportBusyRef.current = false;
+              setExportBusy(false);
+            }
+          }}
+          title={exportBusy ? "正在导出审阅报告" : "导出审阅报告"}
+          aria-label={exportBusy ? "正在导出审阅报告" : "导出审阅报告"}
+          disabled={!canExport || exportBusy}
+        >{exportBusy ? <LoaderCircle size={15} className="animate-spin" /> : <Download size={15} />}</button>
       </div>
 
       {findings.length ? (
@@ -183,7 +210,19 @@ function FindingCard({ finding, selected, onSelect, onAccept, onDismiss, onLocat
   onLocate: () => void;
 }) {
   const actionable = finding.status === "open" && Boolean(finding.after && finding.before && finding.fromLine && finding.toLine);
-  return <article className={cn("finding-card", `severity-${finding.severity.toLowerCase()}`, selected && "selected", `is-${finding.status}`)} onClick={onSelect}>
+  return <article
+    className={cn("finding-card", `severity-${finding.severity.toLowerCase()}`, selected && "selected", `is-${finding.status}`)}
+    tabIndex={0}
+    onClick={(event) => {
+      if (!(event.target as HTMLElement).closest("button, input, textarea, select, a, summary")) onSelect();
+    }}
+    onKeyDown={(event) => {
+      if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+        event.preventDefault();
+        onSelect();
+      }
+    }}
+  >
     <header><span className="severity-badge" title={severityLabels[finding.severity]}>{finding.severity}</span><strong>{finding.title}</strong><span className="finding-category">{categoryLabels[finding.category]}</span></header>
     <p className="finding-evidence">{finding.evidence}</p>
     {finding.before ? <blockquote>{finding.before}</blockquote> : null}
@@ -191,7 +230,7 @@ function FindingCard({ finding, selected, onSelect, onAccept, onDismiss, onLocat
     {finding.after ? <div className="finding-replacement"><strong>建议替换为</strong><p>{finding.after}</p></div> : null}
     {finding.sourceRefs.length ? <details className="finding-sources"><summary>核查来源（{finding.sourceRefs.length}）</summary>{finding.sourceRefs.map((source) => <p key={source.path}><strong>{source.path}</strong><span>{source.snippet}</span></p>)}</details> : null}
     {finding.dismissalReason ? <p className="finding-dismissal">不适用理由：{finding.dismissalReason}</p> : null}
-    <footer onClick={(event) => event.stopPropagation()}>
+    <footer>
       {finding.fromLine ? <button className="soft-button" onClick={onLocate}><MapPin size={14} />定位原文</button> : null}
       {actionable ? <button className="primary-button" onClick={onAccept}><Check size={14} />采用</button> : null}
       {finding.status === "open" || finding.status === "stale" ? <button className="soft-button" onClick={onDismiss}><X size={14} />标记不适用</button> : <span className="finding-status">{finding.status === "accepted" ? "已采用" : "已标记不适用"}</span>}
@@ -219,7 +258,19 @@ function AnnotationCard({ annotation, selected, aiStatus, onSelect, onUpdate, on
   const hasConversation = messages.length > 0;
   const hasAssistantReply = messages.some((message) => message.role === "assistant");
   const keep = annotation.suggestion?.decision === "keep";
-  return <article className={cn("annotation-card", status.tone, selected && "selected")} onClick={onSelect}>
+  return <article
+    className={cn("annotation-card", status.tone, selected && "selected")}
+    tabIndex={0}
+    onClick={(event) => {
+      if (!(event.target as HTMLElement).closest("button, input, textarea, select, a, summary")) onSelect();
+    }}
+    onKeyDown={(event) => {
+      if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+        event.preventDefault();
+        onSelect();
+      }
+    }}
+  >
     <header><span className="status-icon">{status.icon}</span><strong>第 {annotation.fromLine === annotation.toLine ? annotation.fromLine : `${annotation.fromLine}-${annotation.toLine}`} 行</strong><span>{status.label}</span><ChevronDown size={15} className="ml-auto" /><button className="annotation-delete" onClick={(event) => { event.stopPropagation(); onDelete(); }} title="删除批注"><Trash2 size={13} /></button></header>
     <section className="annotation-source"><h3>原文</h3><p className="quoted-text">{annotation.originalText}</p></section>
 
@@ -251,11 +302,11 @@ function AnnotationCard({ annotation, selected, aiStatus, onSelect, onUpdate, on
     {annotation.error ? <p className="annotation-error"><CircleAlert size={14} />{annotation.error}</p> : null}
     {!closed ? (
       <>
-        {hasConversation ? <div className="response-actions" onClick={(event) => event.stopPropagation()}>
+        {hasConversation ? <div className="response-actions">
           {annotation.suggestion && !keep ? <button className="primary-button" onClick={onAccept} disabled={annotation.status === "stale" || isRunning}><Check size={14} />采用这版</button> : null}
           <button className="soft-button" onClick={onIgnore} disabled={isRunning}><X size={14} />{keep ? "接受保留" : "结束本轮"}</button>
         </div> : null}
-        <section className="followup-composer" onClick={(event) => event.stopPropagation()}>
+        <section className="followup-composer">
           <div className="composer-heading"><div><h3>{hasConversation ? "继续追问" : "你的问题"}</h3><small>{hasConversation ? "AI 会记住上面的对话" : "可以润色、起名、解释或列出多个方案"}</small></div>{hasAssistantReply || annotation.status === "error" ? <button className="text-button" onClick={onRegenerate} disabled={isRunning}><RefreshCw size={13} />{annotation.status === "error" ? "重试上一问" : "换个回答"}</button> : null}</div>
           <textarea
             value={annotation.comment}

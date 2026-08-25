@@ -1,5 +1,8 @@
 export type WorkflowState = "blocked" | "needs_changes" | "ready" | "finalized";
 export type WorkflowArtifactState = "missing" | "ready" | "needs_changes" | "stale" | "blocked" | "finalized";
+export type WorkflowRecommendedAction = "copy_to_codex" | "classify_patch" | "generate_taskbook" | "check_body" | "apply_patch";
+export type AiEngine = "deepseek" | "codex";
+export type ReasoningEffort = "low" | "medium" | "high";
 
 export interface WorkflowArtifact {
   id: "blueprint" | "taskbook" | "body" | "review" | "commit" | "memoryPatch";
@@ -24,7 +27,7 @@ export interface WorkflowStatus {
   chapter: number;
   state: WorkflowState;
   artifacts: WorkflowArtifact[];
-  recommendedAction: string;
+  recommendedAction: WorkflowRecommendedAction;
   recommendation: string;
   reviewContext: WorkflowContextItem[];
   legacyPatchChoices: string[];
@@ -59,3 +62,25 @@ export interface TrashEntry {
   deletedAt: string;
   size: number;
 }
+
+export interface TrashRestoreResponse {
+  restored: true;
+  path: string;
+  recoveryArchived: boolean;
+}
+
+export interface ApiStreamError {
+  type: "error";
+  code: string;
+  message: string;
+}
+
+export type AiStreamEnvelope<TSuggestion = unknown> =
+  | { type: "started"; annotationId: string; engine: AiEngine }
+  | { type: "progress"; annotationId: string; message: string }
+  | { type: "result"; annotationId: string; engine: AiEngine; reply: string; suggestion?: TSuggestion; anchorHash: string }
+  | ApiStreamError;
+
+export type ChapterReviewStreamEnvelope<TRun> =
+  | { type: "started" | "local_result" | "audit_result" | "verifying" | "result"; run: TRun; message: string }
+  | (ApiStreamError & { run?: TRun });

@@ -1,0 +1,13 @@
+{
+  "score": 51,
+  "grade": "D",
+  "tags": ["duplication", "over-fit", "legacy"],
+  "findings": [
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/check_chapter.py:389","text":"--output 仅通过 resolve_project_path 检查位于当前小说根目录内，未限制到审查报告目录；atomic_write_text 391 行会覆盖任意项目内文件，误传正文路径即可把审查报告写回真实正文。显式输入 186-190 行也接受任意项目内路径，未限制为正文文件。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/check_chapter.py:24","text":"Python 检查器与 live TS 检查器重复维护字数、章节号、工程词、套路表达、重复和标点规则（Python 215-330；frontend/server/chapter-review.ts:165-292）。两条入口分别由 workflow-api.ts:320-322 和 novel-library-plugin.ts:1400 使用；Python 174-183 取第一个 path/title 命中，TS:190-212 会比较文件名与标题，因此同一正文可能一条路径通过、另一条报告错章。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/check_chapter.py:199","text":"按 --chapter 自动扫描时，sorted(glob('*.md')) 命中第一份即返回，没有检测同章重复正文；与 build_context.py:333-336、workflow-api 的重复章节拒绝策略不一致，多个同章文件时可能检查错误版本。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/check_chapter.py:263","text":"ENGINEERING_TERMS 含常见词“本章”“读者”“伏笔”等，263-273 对原始 Markdown 全文逐字命中即生成 S2；未排除对白、引用、代码块或元数据，合法叙述也可能被误报并因 396-400 返回失败码。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/check_chapter.py:90","text":"90-139 定义了本地 skill_repo_root、resolve_library_root、resolve_project_root 副本，且 MemorySystemError 也未使用；main 实际调用 memory_common 的 registered_library_root/registered_project_root（17-19、372-373），形成死的重复路径实现，若未来误启用还会绕过登记项目校验。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/check_chapter.py:82","text":"--strict 仅被 argparse 解析，后续没有读取；当前实现无论是否传入该参数都在 S1/S2 时返回 1（396-400），属于保留但无行为的 legacy CLI 表面。"}
+  ]
+}

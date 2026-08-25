@@ -1,0 +1,11 @@
+{
+  "score": 58,
+  "grade": "D",
+  "tags": ["stub", "legacy", "over-fit"],
+  "findings": [
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/references/章节最终化.md:8","text":"规范要求最终化前审查报告没有未处理 S1/S2；但 memory_common.py:638-663 只检查报告存在、章节号和 chapter_revision 字符串，不解析审查结论或 Finding 状态，update_memory.py:160-171 仍可直接生成 finalized manifest。workflow-api.ts:326-335 的 apply_patch 也未重新执行该门禁，属于文档声明的关键安全闸门未在应用路径统一落实。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/references/章节最终化.md:12","text":"规范声明来源变化后旧审查、提交和 patch 不再作为下一章依据；但 memory_common.py:748-763/806-840 构建索引时未校验 finalization manifest freshness，build_context.py:274-298 仍从 index 使用章节摘要。只有先运行 memory_doctor 诊断才可能发现 stale，直接构建上下文缺少同等硬约束。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/references/长篇记忆机制.md:14","text":"文档规定选择不超过 20 条相关记忆；实际 build_context.py:542 传入 limit=20，但 memory_common.py:950-952 使用 max(limit, critical_count)，critical 记忆超过 20 条时会突破文档预算约束，规范未说明这一例外。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/.agents/skills/webnovel-writer/references/记忆补丁格式.md:68","text":"文档只列出 chapter_result、outline_baseline、migration 三种 kind，并要求旧 schema v1 只向后读取；实现仍在 memory_common.py:464-467 映射 v1 为 legacy_unknown，并在 766-790 对单个未分类旧 patch 自动赋予 effective_kind=chapter_result。该兼容路径有明确旧数据背景，但规范未完整描述其自动晋级语义，存在 legacy 双协议理解差异。"}
+  ]
+}

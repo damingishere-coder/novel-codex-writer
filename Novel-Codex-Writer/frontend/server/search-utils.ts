@@ -16,20 +16,25 @@ export function stripWebnovelMemoryMetadata(content: string) {
 }
 
 export function parseSearchTerms(query: string) {
-  return Array.from(new Set(query.trim().toLocaleLowerCase("zh-CN").split(/\s+/).filter(Boolean)));
+  return Array.from(new Set(query.slice(0, 200).trim().toLocaleLowerCase("zh-CN").split(/\s+/).filter(Boolean))).slice(0, 16);
 }
 
-export function matchSearchDocument(query: string, document: SearchableDocument): SearchDocumentMatch | null {
-  const terms = parseSearchTerms(query);
-  if (!terms.length) return null;
+export function matchSearchTerms(terms: string[], document: SearchableDocument): SearchDocumentMatch | null {
+  const safeTerms: string[] = [];
+  for (const rawTerm of terms.slice(0, 64)) {
+    const term = rawTerm.trim().toLocaleLowerCase("zh-CN");
+    if (term && !safeTerms.includes(term)) safeTerms.push(term);
+    if (safeTerms.length === 16) break;
+  }
+  if (!safeTerms.length) return null;
 
-  const readableContent = stripWebnovelMemoryMetadata(document.content);
+  const readableContent = stripWebnovelMemoryMetadata(document.content.slice(0, 1_020_000)).slice(0, 1_000_000);
   const title = document.title.toLocaleLowerCase("zh-CN");
   const path = document.path.toLocaleLowerCase("zh-CN");
   const content = readableContent.toLocaleLowerCase("zh-CN");
   let score = 0;
 
-  for (const term of terms) {
+  for (const term of safeTerms) {
     const titleMatched = title.includes(term);
     const pathMatched = path.includes(term);
     const contentMatches = countOccurrences(content, term);
@@ -42,7 +47,7 @@ export function matchSearchDocument(query: string, document: SearchableDocument)
 
   return {
     score,
-    snippet: makeSearchSnippet(readableContent, terms, title, path)
+    snippet: makeSearchSnippet(readableContent, safeTerms, title, path)
   };
 }
 

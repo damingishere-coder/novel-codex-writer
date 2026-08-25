@@ -1,0 +1,632 @@
+{
+ "meta": {
+  "project": "webnovel-writer Skill",
+  "lang": "zh",
+  "subtitle": "V1 工程体检：Codemap + Code Overhaul + SonarQube",
+  "generatedAt": "2026-08-25",
+  "rev": "68e21c6a7b2b12956e0fd641944e97edbeb51a05",
+  "htmlPath": ".codemap/codemap.html",
+  "mdPath": ".codemap/codemap.md",
+  "spineDesc": "用户在 React 工作台操作作品 → 客户端 API → Vite 本地服务网关 → 文件/审阅/工作流服务 → Python 写作与记忆引擎 → Markdown 作品库。",
+  "tracked_loc": 17550,
+  "tracked_files": 97
+ },
+ "excludes": [
+  ".git",
+  ".codemap",
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/__pycache__/**",
+  "**/.runtime/**",
+  "tmp/**",
+  "**/*.png"
+ ],
+ "bands": [
+  {
+   "id": "ui",
+   "tier": "fe",
+   "t": "前端 · 写作工作台",
+   "d": "状态、编辑、审阅与交互"
+  },
+  {
+   "id": "wire",
+   "wire": true,
+   "t": "HTTP / SSE / 本地开发服务器"
+  },
+  {
+   "id": "server",
+   "tier": "be",
+   "t": "服务端 · 本地 API",
+   "d": "路由、文件、审阅与工作流编排"
+  },
+  {
+   "id": "engine",
+   "tier": "be",
+   "t": "写作引擎 · Skill 与 Python",
+   "d": "上下文、章节检查与记忆事务"
+  },
+  {
+   "id": "delivery",
+   "tier": "ops",
+   "t": "交付 · 运行与治理",
+   "d": "本地启动、容器、文档与 CI"
+  }
+ ],
+ "spine": [
+  "app_shell",
+  "client_api",
+  "server_gateway",
+  "workflow_orchestration",
+  "context_retrieval",
+  "memory_core"
+ ],
+ "reportThemes": [
+  [
+   "并发写入已经变为显式冲突",
+   "正文、历史、作品索引和 Python 记忆事务使用跨进程锁、revision/hash 重检、锁所有权续租与原子替换；竞争者不再静默覆盖，而是提交成功、幂等跳过或返回明确冲突。"
+  ],
+  [
+   "Canonical 路径边界覆盖递归入口",
+   "显式文件、作品库扫描、审阅上下文、历史、回收站、导出、工作流与 Python memory 工具都验证真实路径；项目外 junction/symlink 哨兵会在入口被拒绝。"
+  ],
+  [
+   "AI 与最终化协议改为 fail-closed",
+   "客户端响应、AI finding、stored run、review proof、patch、finalization manifest 与 context revisions 均做运行时校验；损坏、陈旧或缺少服务端签发依据的状态不能降级为通过。"
+  ],
+  [
+   "核心 seam 已提取，剩余 bloat 被显式记录",
+   "项目、文档、Provider、会话、错误、可观测性、App hooks 与 Memory Core 均完成分段；Workflow、Storage、Chapter Review 和 Gateway 仍偏大，但已降为有测试覆盖的维护性债务。"
+  ],
+  [
+   "CI、覆盖率与关键 E2E 已成为真实门禁",
+   "CI 运行两组 Python 测试与覆盖率、135 个 Vitest、TypeScript/Vite 构建、依赖审计和 3 条关键 Playwright 流程；本机 Sonar 使用相同 LCOV/XML 产物做独立扫描。"
+  ],
+  [
+   "预算、缓存与取消约束大型作品成本",
+   "扫描文件/字节、上下文、工作流读取、Provider 输出/耗时、导出与 verification bundle 都有硬上限；请求缓存、幂等合并及进程树终止降低重复 I/O、挂起与重复计费。"
+  ]
+ ],
+ "modules": [
+  {
+   "id": "app_shell",
+   "label": "Workbench App Shell",
+   "band": "ui",
+   "path": "Novel-Codex-Writer/frontend/src/App.tsx",
+   "paths": [
+    "Novel-Codex-Writer/frontend/src/App.tsx",
+    "Novel-Codex-Writer/frontend/src/main.tsx",
+    "Novel-Codex-Writer/frontend/src/hooks/*.ts"
+   ],
+   "tests": [
+    "Novel-Codex-Writer/frontend/src/hooks/*.test.ts"
+   ],
+   "coupling": "core",
+   "deps": [
+    "workbench_ui",
+    "client_api",
+    "contracts"
+   ],
+   "desc": "承载工作台全局状态、自动保存、搜索、审阅流、工作流动作和主要页面组合。",
+   "loc": 1907,
+   "contentHash": "dce634c5e92afe482969cc8d254f78f96b85a65d81eb9af324ea9931524234cb",
+   "score": 100,
+   "grade": "A",
+   "tags": [
+    "clean"
+   ],
+   "findings": [],
+   "auditedHash": "dce634c5e92afe482969cc8d254f78f96b85a65d81eb9af324ea9931524234cb",
+   "auditedAt": "2026-08-26",
+   "auditedRev": "68e21c6a7b2b12956e0fd641944e97edbeb51a05"
+  },
+  {
+   "id": "workbench_ui",
+   "label": "Workbench Components",
+   "band": "ui",
+   "path": "Novel-Codex-Writer/frontend/src/components",
+   "paths": [
+    "Novel-Codex-Writer/frontend/src/components/**/*.tsx",
+    "Novel-Codex-Writer/frontend/src/styles.css",
+    "Novel-Codex-Writer/frontend/index.html",
+    "Novel-Codex-Writer/frontend/public/favicon.svg"
+   ],
+   "coupling": "high",
+   "deps": [
+    "contracts",
+    "client_api"
+   ],
+   "desc": "提供编辑器、作品库、审阅、恢复和工作流可视组件及整体样式。",
+   "loc": 2285,
+   "contentHash": "3e433f3eb4e9145d0ce7abee0f4b591277fef3befd0b34a2c7419d2b46c658c7",
+   "score": 98,
+   "grade": "A",
+   "tags": [
+    "bloat"
+   ],
+   "findings": [
+    {
+     "sev": "LOW",
+     "loc": "Novel-Codex-Writer/frontend/src/components/WorkbenchView.tsx:159",
+     "text": "WorkbenchView 当前 609 行，同时包含主工作台、PaneResizeHandle、多个项目/设置/文档对话框、Modal 及状态页，多个交互边界集中在单文件，维护负担偏高。"
+    }
+   ],
+   "auditedHash": "3e433f3eb4e9145d0ce7abee0f4b591277fef3befd0b34a2c7419d2b46c658c7",
+   "auditedAt": "2026-08-26",
+   "auditedRev": "68e21c6a7b2b12956e0fd641944e97edbeb51a05"
+  },
+  {
+   "id": "client_api",
+   "label": "Client API & Utilities",
+   "band": "ui",
+   "path": "Novel-Codex-Writer/frontend/src/lib",
+   "paths": [
+    "Novel-Codex-Writer/frontend/src/lib/*.ts"
+   ],
+   "coupling": "high",
+   "deps": [
+    "contracts",
+    "server_gateway"
+   ],
+   "desc": "封装本地 API、SSE/流式解析、批注处理、格式化与面板布局逻辑。",
+   "tests": [
+    "Novel-Codex-Writer/frontend/src/lib/*.test.ts"
+   ],
+   "loc": 1394,
+   "contentHash": "3b92029771ae6317cadb8b9a3fa5526fe3bade1df1746f18f55d6afa88ad8764",
+   "score": 100,
+   "grade": "A",
+   "tags": [
+    "clean"
+   ],
+   "findings": [],
+   "auditedHash": "3b92029771ae6317cadb8b9a3fa5526fe3bade1df1746f18f55d6afa88ad8764",
+   "auditedAt": "2026-08-26",
+   "auditedRev": "68e21c6a7b2b12956e0fd641944e97edbeb51a05"
+  },
+  {
+   "id": "contracts",
+   "label": "Shared Contracts",
+   "band": "ui",
+   "path": "Novel-Codex-Writer/frontend/shared + src/types.ts",
+   "paths": [
+    "Novel-Codex-Writer/frontend/shared/*.ts",
+    "Novel-Codex-Writer/frontend/src/types.ts"
+   ],
+   "coupling": "high",
+   "deps": [],
+   "desc": "定义前后端共享工作流、文档版本、审阅、AI 状态和作品库数据契约。",
+   "loc": 369,
+   "contentHash": "2a29ba489b90ee14a282221379efaaa3761abf135e8dba9a2f2cc3b29491fb5d",
+   "score": 98,
+   "grade": "A",
+   "tags": [
+    "duplication"
+   ],
+   "findings": [
+    {
+     "sev": "LOW",
+     "loc": "Novel-Codex-Writer/frontend/src/types.ts:152",
+     "text": "ReviewFinding、ReviewContextManifestItem、ChapterReviewRun在客户端types.ts:152-194与服务端chapter-review.ts:11-76分别维护，字段和枚举当前一致但没有共享类型约束；api.ts还另有一套运行时校验，后续字段或枚举变更存在前后端漂移风险。"
+    }
+   ],
+   "auditedHash": "2a29ba489b90ee14a282221379efaaa3761abf135e8dba9a2f2cc3b29491fb5d",
+   "auditedAt": "2026-08-26",
+   "auditedRev": "68e21c6a7b2b12956e0fd641944e97edbeb51a05"
+  },
+  {
+   "id": "server_gateway",
+   "label": "Local API Gateway",
+   "band": "server",
+   "path": "Novel-Codex-Writer/frontend/server/novel-library-plugin.ts",
+   "paths": [
+    "Novel-Codex-Writer/frontend/server/novel-library-plugin.ts",
+    "Novel-Codex-Writer/frontend/server/register-novel-routes.ts",
+    "Novel-Codex-Writer/frontend/server/project-service.ts",
+    "Novel-Codex-Writer/frontend/server/document-service.ts",
+    "Novel-Codex-Writer/frontend/server/review-session-service.ts",
+    "Novel-Codex-Writer/frontend/vite.config.ts"
+   ],
+   "tests": [
+    "Novel-Codex-Writer/frontend/server/ai-safety.test.ts"
+   ],
+   "coupling": "core",
+   "deps": [
+    "storage_versioning",
+    "workflow_orchestration",
+    "review_pipeline",
+    "server_utilities",
+    "contracts"
+   ],
+   "desc": "把 Vite 开发服务器扩展成本地作品库 API，并编排路由、AI Provider、会话与错误响应。",
+   "loc": 2462,
+   "contentHash": "900dd9ff4e234c92abad22838e17dcebd5e750a5ae51cdd2a11882101b8bf8af",
+   "score": 98,
+   "grade": "A",
+   "tags": [
+    "bloat"
+   ],
+   "findings": [
+    {
+     "sev": "LOW",
+     "loc": "Novel-Codex-Writer/frontend/server/novel-library-plugin.ts:332",
+     "text": "网关文件仍约 1612 行，集中注册并编排 projects、library、document、versions、trash、export、workflow、search、metrics、AI、review 等多类路由；服务虽已拆分，仍有明显职责与维护体量。"
+    }
+   ],
+   "auditedHash": "900dd9ff4e234c92abad22838e17dcebd5e750a5ae51cdd2a11882101b8bf8af",
+   "auditedAt": "2026-08-26",
+   "auditedRev": "68e21c6a7b2b12956e0fd641944e97edbeb51a05"
+  },
+  {
+   "id": "storage_versioning",
+   "label": "File Storage & Recovery",
+   "band": "server",
+   "path": "Novel-Codex-Writer/frontend/server/file-storage.ts",
+   "paths": [
+    "Novel-Codex-Writer/frontend/server/file-storage.ts",
+    "Novel-Codex-Writer/frontend/server/file-lock.ts"
+   ],
+   "coupling": "high",
+   "deps": [
+    "contracts"
+   ],
+   "desc": "负责原子写、revision、历史版本、回收站恢复及 Markdown/ZIP 导出。",
+   "tests": [
+    "Novel-Codex-Writer/frontend/server/file-storage.test.ts"
+   ],
+   "loc": 1151,
+   "contentHash": "eabb17a37f72a1e3ffcd1fa3716c655db690477c4d29d5a6413d3b77a0afc6a8",
+   "score": 98,
+   "grade": "A",
+   "tags": [
+    "bloat"
+   ],
+   "findings": [
+    {
+     "sev": "LOW",
+     "loc": "Novel-Codex-Writer/frontend/server/file-storage.ts:1",
+     "text": "file-storage.ts 当前约 843 行，同时承载路径安全、锁、文档读写、历史、回收站和 Markdown/ZIP 导出，职责面过宽，维护成本较高。"
+    }
+   ],
+   "auditedHash": "eabb17a37f72a1e3ffcd1fa3716c655db690477c4d29d5a6413d3b77a0afc6a8",
+   "auditedAt": "2026-08-26",
+   "auditedRev": "68e21c6a7b2b12956e0fd641944e97edbeb51a05"
+  },
+  {
+   "id": "workflow_orchestration",
+   "label": "Workflow Orchestration",
+   "band": "server",
+   "path": "Novel-Codex-Writer/frontend/server/workflow-api.ts",
+   "paths": [
+    "Novel-Codex-Writer/frontend/server/workflow-api.ts"
+   ],
+   "coupling": "high",
+   "deps": [
+    "contracts",
+    "context_retrieval",
+    "memory_operations"
+   ],
+   "desc": "计算任务书、正文、审阅、memory patch 与最终化状态，并调用 Python 工作流动作。",
+   "tests": [
+    "Novel-Codex-Writer/frontend/server/workflow-api.test.ts"
+   ],
+   "loc": 777,
+   "contentHash": "811cb49ee6a0a8a4e705b3032090f8b3cff9ea9ee816e5ba740157cd08d4ea63",
+   "score": 95,
+   "grade": "A",
+   "tags": [
+    "bloat",
+    "god-component"
+   ],
+   "findings": [
+    {
+     "sev": "MED",
+     "loc": "Novel-Codex-Writer/frontend/server/workflow-api.ts:441",
+     "text": "约 772 行模块仍集中承担状态表计算、artifact/revision 校验、proof/context 重读、patch 分类与选择、Python 解释器和进程树生命周期、动作编排，职责边界过宽，维护性风险仍在。"
+    }
+   ],
+   "auditedHash": "811cb49ee6a0a8a4e705b3032090f8b3cff9ea9ee816e5ba740157cd08d4ea63",
+   "auditedAt": "2026-08-26",
+   "auditedRev": "68e21c6a7b2b12956e0fd641944e97edbeb51a05"
+  },
+  {
+   "id": "review_pipeline",
+   "label": "Chapter Review Pipeline",
+   "band": "server",
+   "path": "Novel-Codex-Writer/frontend/server/chapter-review.ts",
+   "paths": [
+    "Novel-Codex-Writer/frontend/server/chapter-review.ts",
+    "Novel-Codex-Writer/frontend/server/review-provider.ts",
+    "Novel-Codex-Writer/frontend/server/provider-adapter.ts",
+    "Novel-Codex-Writer/frontend/server/*.schema.json"
+   ],
+   "coupling": "high",
+   "deps": [
+    "contracts",
+    "server_utilities"
+   ],
+   "desc": "组装整章上下文，运行确定性检查，解析 AI 审阅并执行证据二次核查。",
+   "tests": [
+    "Novel-Codex-Writer/frontend/server/chapter-review.test.ts"
+   ],
+   "loc": 1341,
+   "contentHash": "e2768fe5f0fbb20f7196397831575fd52a9d310a77e9518b432b6ccd3af6928f",
+   "score": 95,
+   "grade": "A",
+   "tags": [
+    "bloat",
+    "god-component"
+   ],
+   "findings": [
+    {
+     "sev": "MED",
+     "loc": "Novel-Codex-Writer/frontend/server/chapter-review.ts:358",
+     "text": "约 890 行模块仍集中承担上下文读取、确定性检查、AI schema 解析、事实核查、revision manifest 与运行记录规范化，职责边界过宽，维护性风险仍在。"
+    }
+   ],
+   "auditedHash": "e2768fe5f0fbb20f7196397831575fd52a9d310a77e9518b432b6ccd3af6928f",
+   "auditedAt": "2026-08-26",
+   "auditedRev": "68e21c6a7b2b12956e0fd641944e97edbeb51a05"
+  },
+  {
+   "id": "server_utilities",
+   "label": "Server Guards & Utilities",
+   "band": "server",
+   "path": "Novel-Codex-Writer/frontend/server utilities",
+   "paths": [
+    "Novel-Codex-Writer/frontend/server/api-security.ts",
+    "Novel-Codex-Writer/frontend/server/http-error.ts",
+    "Novel-Codex-Writer/frontend/server/observability.ts",
+    "Novel-Codex-Writer/frontend/server/search-utils.ts",
+    "Novel-Codex-Writer/frontend/server/review-utils.ts"
+   ],
+   "coupling": "med",
+   "deps": [
+    "contracts"
+   ],
+   "desc": "提供本地请求边界、JSON 体限制、搜索匹配、revision/anchor 和 AI 结果校验。",
+   "tests": [
+    "Novel-Codex-Writer/frontend/server/api-security.test.ts",
+    "Novel-Codex-Writer/frontend/server/http-error.test.ts",
+    "Novel-Codex-Writer/frontend/server/observability.test.ts",
+    "Novel-Codex-Writer/frontend/server/search-utils.test.ts",
+    "Novel-Codex-Writer/frontend/server/review-utils.test.ts"
+   ],
+   "loc": 457,
+   "contentHash": "a5955189d559a06bda6505bcda30d30bc06725f837f64dbfdaf96a2371325586",
+   "score": 100,
+   "grade": "A",
+   "tags": [
+    "clean"
+   ],
+   "findings": [],
+   "auditedHash": "a5955189d559a06bda6505bcda30d30bc06725f837f64dbfdaf96a2371325586",
+   "auditedAt": "2026-08-26",
+   "auditedRev": "68e21c6a7b2b12956e0fd641944e97edbeb51a05"
+  },
+  {
+   "id": "memory_core",
+   "label": "Memory Core",
+   "band": "engine",
+   "path": "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_common.py",
+   "paths": [
+    "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_common.py",
+    "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_paths.py",
+    "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_patch_schema.py",
+    "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_index.py",
+    "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_transactions.py",
+    "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_diagnostics.py"
+   ],
+   "coupling": "core",
+   "deps": [],
+   "desc": "实现作品注册、路径约束、patch/schema、索引、事务、恢复、诊断和最终化事实模型。",
+   "tests": [
+    "Novel-Codex-Writer/tests/test_memory_workflow.py",
+    "tests/test_memory_system_functional.py"
+   ],
+   "loc": 2524,
+   "contentHash": "819abcd8c452d5a8182b2db6b19d4db903594850bd0a3aa302b0ee20b0e53a85",
+   "score": 95,
+   "grade": "A",
+   "tags": [
+    "bloat"
+   ],
+   "findings": [
+    {
+     "sev": "MED",
+     "loc": "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_transactions.py:190",
+     "text": "继承/普通锁续租与 lost event、staging/每次替换/恢复/回滚前 owner 复检已覆盖先前并发风险；当前主要维护风险仍是 788 行模块集中实现锁回收、事务 staging、提交、回滚和恢复，且 memory_patch_schema.py 仍约 760 行并混合记录、patch、ledger、proof、manifest 与历史选择职责，后续协议改动回归面较大。"
+    }
+   ],
+   "auditedHash": "819abcd8c452d5a8182b2db6b19d4db903594850bd0a3aa302b0ee20b0e53a85",
+   "auditedAt": "2026-08-26",
+   "auditedRev": "68e21c6a7b2b12956e0fd641944e97edbeb51a05"
+  },
+  {
+   "id": "memory_operations",
+   "label": "Memory Operations",
+   "band": "engine",
+   "path": "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/update_memory.py",
+   "paths": [
+    "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/update_memory.py",
+    "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/compact_memory.py",
+    "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/memory_doctor.py"
+   ],
+   "coupling": "high",
+   "deps": [
+    "memory_core"
+   ],
+   "desc": "执行记忆 patch、篇末压缩、迁移诊断与显式事务恢复。",
+   "tests": [
+    "Novel-Codex-Writer/tests/test_memory_workflow.py"
+   ],
+   "loc": 654,
+   "contentHash": "2787c557f037efbf1a60f773c6a5d6f0c06c61c0eb3b097693ac2def8014ea3b",
+   "score": 98,
+   "grade": "A",
+   "tags": [
+    "legacy"
+   ],
+   "findings": [
+    {
+     "sev": "LOW",
+     "loc": "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/compact_memory.py:171",
+     "text": "篇末压缩仍调用兼容选择器，旧 schema v1 或单个 legacy_unknown patch 可在没有新鲜 v2 finalization manifest 时进入 snapshot；这是明确的兼容路径，但与当前 v2 fail-closed 门禁并行，仍是待淘汰的 legacy surface。"
+    }
+   ],
+   "auditedHash": "2787c557f037efbf1a60f773c6a5d6f0c06c61c0eb3b097693ac2def8014ea3b",
+   "auditedAt": "2026-08-26",
+   "auditedRev": "68e21c6a7b2b12956e0fd641944e97edbeb51a05"
+  },
+  {
+   "id": "context_retrieval",
+   "label": "Context Retrieval",
+   "band": "engine",
+   "path": "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/build_context.py",
+   "paths": [
+    "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/build_context.py",
+    "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/query_memory.py"
+   ],
+   "coupling": "high",
+   "deps": [
+    "memory_core"
+   ],
+   "desc": "按章节预算检索记忆、篇纲、细纲与前五章正文，生成本章写作任务书。",
+   "tests": [
+    "Novel-Codex-Writer/tests/test_memory_workflow.py",
+    "tests/test_memory_system_functional.py"
+   ],
+   "loc": 770,
+   "contentHash": "ce4bcacbdfd98c84b76125cf145bd0fcbde8f4cde72793752268c7a5b1bc8220",
+   "score": 93,
+   "grade": "A",
+   "tags": [
+    "bloat",
+    "legacy"
+   ],
+   "findings": [
+    {
+     "sev": "MED",
+     "loc": "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/build_context.py:1",
+     "text": "单文件 653 行、25 个定义，同时承担 Markdown 解析、篇纲/细纲门禁、连续前章选择、索引检索、预算裁剪、任务书渲染、revision 元数据、事务写入和 CLI 编排；职责集中使规则变更与回归维护成本偏高。"
+    },
+    {
+     "sev": "LOW",
+     "loc": "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/build_context.py:119",
+     "text": "仍保留 --max-section-chars 旧参数并映射到任务书总预算；当前有明确互斥校验和迁移提示，属于有界但仍在运行的 legacy 兼容面。"
+    }
+   ],
+   "auditedHash": "ce4bcacbdfd98c84b76125cf145bd0fcbde8f4cde72793752268c7a5b1bc8220",
+   "auditedAt": "2026-08-26",
+   "auditedRev": "68e21c6a7b2b12956e0fd641944e97edbeb51a05"
+  },
+  {
+   "id": "chapter_checker",
+   "label": "Chapter Checker",
+   "band": "engine",
+   "path": "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/check_chapter.py",
+   "paths": [
+    "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/check_chapter.py"
+   ],
+   "coupling": "med",
+   "deps": [
+    "memory_core"
+   ],
+   "desc": "对章节字数、编号、工程词、AI 套路、重复与标点执行本地确定性检查。",
+   "tests": [
+    "tests/test_chapter_checker_smoke.py",
+    "tests/test_demo_novel.py"
+   ],
+   "loc": 487,
+   "contentHash": "590e2ee021cf39619e0f07979e8c34f0583f2d9c2ec910e8040f52e993412ce0",
+   "score": 96,
+   "grade": "A",
+   "tags": [
+    "duplication",
+    "bloat"
+   ],
+   "findings": [
+    {
+     "sev": "LOW",
+     "loc": "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/check_chapter.py:152",
+     "text": "strip_markdown/count_readable_words、重复段落和标点检查仍与TypeScript入口分别实现；共享规则JSON以及tests/test_chapter_checker_smoke.py:53-68和TS fixture测试已显著降低漂移风险，但算法修改仍需双边维护。"
+    },
+    {
+     "sev": "LOW",
+     "loc": "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/check_chapter.py:1",
+     "text": "当前约487行，仍集中承担规则加载、CLI、路径与链接校验、Markdown计数、章节号解析、多类检查、报告渲染、锁和写入；职责相关但维护面偏大。"
+    }
+   ],
+   "auditedHash": "590e2ee021cf39619e0f07979e8c34f0583f2d9c2ec910e8040f52e993412ce0",
+   "auditedAt": "2026-08-26",
+   "auditedRev": "68e21c6a7b2b12956e0fd641944e97edbeb51a05"
+  },
+  {
+   "id": "writing_skill_spec",
+   "label": "Writing Skill Specification",
+   "band": "engine",
+   "path": "Novel-Codex-Writer/.agents/skills/webnovel-writer",
+   "paths": [
+    "Novel-Codex-Writer/.agents/skills/webnovel-writer/SKILL.md",
+    "Novel-Codex-Writer/.agents/skills/webnovel-writer/agents/*.yaml",
+    "Novel-Codex-Writer/.agents/skills/webnovel-writer/references/*.md"
+   ],
+   "coupling": "high",
+   "deps": [
+    "context_retrieval",
+    "chapter_checker",
+    "memory_operations"
+   ],
+   "desc": "规定长篇小说写作、记忆检索、章节审查、提交和最终化的代理工作协议。",
+   "loc": 353,
+   "contentHash": "5a13f08023da17c49a812211721cec270defb3d69ad896229ec4d1d28a17c2eb",
+   "score": 100,
+   "grade": "A",
+   "tags": [
+    "clean"
+   ],
+   "findings": [],
+   "auditedHash": "5a13f08023da17c49a812211721cec270defb3d69ad896229ec4d1d28a17c2eb",
+   "auditedAt": "2026-08-26",
+   "auditedRev": "68e21c6a7b2b12956e0fd641944e97edbeb51a05"
+  },
+  {
+   "id": "runtime_delivery",
+   "label": "Runtime & Delivery",
+   "band": "delivery",
+   "path": "Novel-Codex-Writer runtime scripts and CI",
+   "paths": [
+    ".github/workflows/*",
+    "Novel-Codex-Writer/scripts/windows/*.ps1",
+    "Novel-Codex-Writer/*.bat",
+    "Novel-Codex-Writer/docker-compose.yml",
+    "Novel-Codex-Writer/frontend/Dockerfile",
+    "Novel-Codex-Writer/frontend/package.json",
+    "Novel-Codex-Writer/frontend/tsconfig*.json",
+    "Novel-Codex-Writer/frontend/vitest.config.ts",
+    "Novel-Codex-Writer/frontend/playwright.config.ts",
+    "sonar-project.properties"
+   ],
+   "tests": [
+    "Novel-Codex-Writer/frontend/e2e/*.spec.ts",
+    "tests/test_repository_safety.py"
+   ],
+   "coupling": "med",
+   "deps": [
+    "server_gateway",
+    "writing_skill_spec"
+   ],
+   "desc": "提供 Windows 原生与 Docker 启停、前端构建配置、依赖清单和仓库 CI。",
+   "loc": 619,
+   "contentHash": "5be880d3d1c5658e69011920d4e9af67fd320f6c75bd4f23ed39d19c878ee6fc",
+   "score": 100,
+   "grade": "A",
+   "tags": [
+    "clean"
+   ],
+   "findings": [],
+   "auditedHash": "5be880d3d1c5658e69011920d4e9af67fd320f6c75bd4f23ed39d19c878ee6fc",
+   "auditedAt": "2026-08-26",
+   "auditedRev": "68e21c6a7b2b12956e0fd641944e97edbeb51a05"
+  }
+ ]
+}

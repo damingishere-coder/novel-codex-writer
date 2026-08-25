@@ -1,0 +1,14 @@
+{
+  "score": 52,
+  "grade": "D",
+  "tags": ["god-component", "bloat", "fallback", "silent-except", "legacy"],
+  "findings": [
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/src/App.tsx:107","text":"App 组件覆盖 App.tsx:107-1129；同一组件同时持有约 28 个 state/ref（108-165）、初始化/库/工作流/文档/搜索网络 effect（242-402）、自动保存（339-371）、AI/工作流动作（459-834）及全部页面和模态框 JSX（874-1129），状态、网络、AI 与展示高度耦合，构成真实 god-component 维护风险。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/src/App.tsx:339","text":"自动保存 effect 依赖 session.annotations、chapterReviewRuns、status，每次变化都会在 500ms 后调用 persistReviewSession；章节审查流在 582-587 的每个事件都会更新 chapterReviewRuns，而 347-371 仅保留一个 in-flight 和一个 pending，长流仍可能产生连续的整段 session 写入。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/src/App.tsx:784","text":"processAll 只快照待处理注释并顺序调用 callAi，没有运行中锁或幂等键；callAi 在 729-742 每次新建 AbortController，aiRequestsRef 仅保存控制器而不按 annotation 去重。重复触发可为同一注释发起多个 AI stream，存在重复调用及重复计费风险。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/src/App.tsx:284","text":"工作流状态 effect 依赖 activeProjectId、selectedEntry.chapterNumber、library.generatedAt 并立即调用 fetchWorkflowStatus；库加载 effect 258-282 随后设置 library/selectedPath，首次未选章节的请求可能在选中章节后再次请求。保存和工作流动作 459-504 还会刷新 library，进一步增加重复状态读取。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/src/App.tsx:565","text":"createAnnotation 使用闭包中的 session 通过 setSession({...session,...}) 更新，而非 functional updater；同一 render 内快速创建多个注释时，后一次更新可能覆盖前一次，存在丢注释的状态竞态。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/frontend/src/App.tsx:138","text":"读取 novel-open-groups 时 JSON.parse 异常被 catch 吞掉并直接返回默认分组（138-143），损坏数据或格式变更没有告警或可观测性，属于静默 fallback。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/frontend/src/App.tsx:1301","text":"migrateReviewAnnotation 在运行路径中为缺少 messages 的旧注释合成 legacy-user/legacy-assistant 消息，并改写旧 assistant 内容（1299-1339）；这是有边界的兼容 shim，但持续保留新旧数据形状分支并增加维护复杂度。"}
+  ]
+}

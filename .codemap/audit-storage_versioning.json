@@ -1,0 +1,15 @@
+{
+  "score": 44,
+  "grade": "D",
+  "tags": ["fallback", "silent-except"],
+  "findings": [
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/server/file-storage.ts:49","text":"atomicWriteFile 的临时文件名仅由目标 basename、process.pid、Date.now() 构成（49-56）；同一进程同一毫秒对相同或同名目标并发写入会共享 temporary，writeFile、rename 与清理互相竞争，原子写可能报错或产生不确定的最终内容。"},
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/server/file-storage.ts:82","text":"历史目录只执行词法 assertInsidePath（82-85），list/read 也未执行 realpath 符号链接校验（103-128）；.history junction/symlink 可将历史读写导向项目外。exportBookMarkdown/exportProjectZip 将正文根或项目根直接交给 collectFiles（176-184、246-262、338-348），根目录本身为 junction/symlink 时同样可越界。"},
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/server/file-storage.ts:227","text":"restoreTrashEntry 对调用方 entryId 解码后只做词法来源检查和 existsSync，随后直接 rename（227-238）；没有 lstat/isFile/realpath，伪造条目可把回收站中的 symlink 或目录移入项目。目标的 existsSync 检查与 rename 也存在 TOCTOU，并发创建目标时可能覆盖文件。"},
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/server/file-storage.ts:158","text":"restoreDocumentVersion 在 165-168 读取并比较 expectedRevision，随后在 169-173 保存历史并写入旧版本，没有锁或写前再次校验；并发 PUT/恢复在检查后修改正文时，恢复操作仍会覆盖最新内容。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/server/file-storage.ts:329","text":"backupExcluded 只排除精确名称 .env、日志及少数运行目录（329-335）；exportProjectZip 会递归读取其余普通文件（338-348），因此 .env.local、.env.production、*.key、*.pem、credentials 等项目内 Provider 凭据可能被打入完整备份。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/server/file-storage.ts:338","text":"exportProjectZip 通过 Promise.all 一次性 readFile 全部项目文件（342-349），createStoredZip 又保留全部 local/central buffers 并 Buffer.concat（284-326）；exportBookMarkdown 也一次性读取全部章节（257-259），没有大小/数量上限或流式处理，较大项目可造成显著内存峰值。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/server/file-storage.ts:176","text":"collectFiles 在根目录不存在时直接返回空数组（176-177），exportBookMarkdown/exportProjectZip 仍继续写出成功结果（246-263、338-359）；正文目录被删除、未挂载或项目损坏时会生成空书或仅含元数据的备份，无法区分故障与合法空项目。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/server/file-storage.ts:56","text":"atomicWriteFile 的 finally 对临时文件 unlink 异常使用 catch(() => undefined) 静默吞掉（55-56）；写入失败后可能残留包含稿件或配置内容的 .tmp 文件，并掩盖清理失败。"}
+  ]
+}

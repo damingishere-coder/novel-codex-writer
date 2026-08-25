@@ -24,6 +24,8 @@ from memory_common import (
     memory_source_files,
     normalize_chapter,
     parse_chapter_number,
+    project_files,
+    project_write_lock,
     rank_index_records,
     read_text,
     resolve_library_root,
@@ -63,8 +65,10 @@ def build_taskbook_metadata(
     content: str,
 ) -> dict[str, object]:
     sources = []
-    for path in sorted({path.resolve() for path in source_paths if path.is_file()}):
+    for path in sorted({path.resolve() for path in source_paths}):
         checked = assert_project_path(project_root, path, "任务书来源")
+        if not checked.is_file():
+            raise MemorySystemError(f"任务书必需来源不存在或不是文件：{checked.relative_to(project_root).as_posix()}")
         sources.append(
             {
                 "path": checked.relative_to(project_root).as_posix(),
@@ -84,13 +88,23 @@ def build_taskbook_metadata(
 def write_taskbook(project_root: Path, output: Path, content: str, metadata: dict[str, object]) -> Path:
     metadata_path = output.with_name(output.name + ".meta.json")
     assert_project_path(project_root, metadata_path, "任务书 metadata 输出")
-    apply_transaction(
-        project_root,
-        {
-            output: content,
-            metadata_path: json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
-        },
-    )
+    with project_write_lock(project_root):
+        sources = metadata.get("sources")
+        if not isinstance(sources, list):
+            raise MemorySystemError("任务书 metadata 缺少来源清单。")
+        for source in sources:
+            if not isinstance(source, dict) or not isinstance(source.get("path"), str) or not isinstance(source.get("revision"), str):
+                raise MemorySystemError("任务书 metadata 包含无效来源。")
+            target = assert_project_path(project_root, project_root / source["path"], "任务书来源")
+            if not target.is_file() or sha256_file(target) != source["revision"]:
+                raise MemorySystemError(f"任务书来源在提交前已变化：{source['path']}")
+        apply_transaction(
+            project_root,
+            {
+                output: content,
+                metadata_path: json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
+            },
+        )
     return metadata_path
 
 
@@ -118,22 +132,24 @@ def resolve_budget(args: argparse.Namespace) -> tuple[int, bool]:
     budget = 1500 if budget is None else budget
     if budget < 800:
         raise MemorySystemError("任务书预算不能低于 800 字符，否则无法可靠保留关键规则。")
+    if budget > 12_000:
+        raise MemorySystemError("任务书预算不能高于 12000 字符，请拆分资料或缩小单章上下文。")
     return budget, legacy
 
 
 def heading_section(text: str, heading_pattern: str) -> str:
     lines = text.splitlines()
-    start = None
-    level = None
     pattern = re.compile(heading_pattern)
+    matches: list[tuple[int, int]] = []
     for index, line in enumerate(lines):
         match = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
         if match and pattern.search(match.group(2)):
-            start = index + 1
-            level = len(match.group(1))
-            break
-    if start is None or level is None:
+            matches.append((index + 1, len(match.group(1))))
+    if len(matches) > 1:
+        raise MemorySystemError(f"文档包含重复标题，无法唯一选择章节：{heading_pattern}")
+    if not matches:
         return ""
+    start, level = matches[0]
     end = len(lines)
     for index in range(start, len(lines)):
         match = re.match(r"^(#{1,6})\s+", lines[index])
@@ -143,9 +159,12 @@ def heading_section(text: str, heading_pattern: str) -> str:
     return "\n".join(lines[start:end]).strip()
 
 
-def chapter_section(text: str, chapter: int) -> str:
+def chapter_section(text: str, chapter: int, *, required: bool = False) -> str:
     label = f"{chapter:03d}"
-    return heading_section(text, rf"^第\s*0*{chapter}\s*章(?:\s|$)|^第{label}章(?:\s|$)")
+    section = heading_section(text, rf"^第\s*0*{chapter}\s*章(?:\s|$)|^第{label}章(?:\s|$)")
+    if required and not section:
+        raise MemorySystemError(f"文档缺少第{chapter:03d}章的唯一章节段落。")
+    return section
 
 
 def complete_list_items(text: str) -> list[str]:
@@ -167,23 +186,34 @@ def complete_list_items(text: str) -> list[str]:
             current = None
     if current:
         items.append(current)
-    return [" ".join(item) for item in items]
+    rendered = [" ".join(item) for item in items]
+    return [
+        item
+        for item in rendered
+        if re.sub(r"^(?:[-*+]|\d+\.)\s*", "", item).strip()
+    ]
 
 
 def paragraph_blocks(text: str) -> list[str]:
     blocks = [block.strip() for block in re.split(r"\n\s*\n", text) if block.strip()]
-    return [block for block in blocks if not block.startswith("|") and not re.match(r"^[-*+] ", block)]
+    return [
+        block
+        for block in blocks
+        if not block.startswith("|")
+        and not re.match(r"^[-*+] ", block)
+        and re.search(r"[\w\u4e00-\u9fff]", re.sub(r"(?m)^\s*>\s?", "", block))
+    ]
 
 
 def table_change_atoms(section: str) -> list[str]:
     rows = [line.strip() for line in section.splitlines() if line.strip().startswith("|")]
     if len(rows) < 3:
-        return []
+        raise MemorySystemError("细纲的“情节点与字数预算”必须包含表头和至少一个情节点。")
     headers = [cell.strip() for cell in rows[0].strip("|").split("|")]
     try:
         change_index = headers.index("必须产生的变化")
-    except ValueError:
-        return []
+    except ValueError as exc:
+        raise MemorySystemError("细纲的情节点表缺少“必须产生的变化”列。") from exc
     point_index = headers.index("情节点") if "情节点" in headers else None
     results: list[str] = []
     for row in rows[2:]:
@@ -194,6 +224,8 @@ def table_change_atoms(section: str) -> list[str]:
         point = cells[point_index] if point_index is not None and len(cells) > point_index else ""
         if change:
             results.append(f"- {point} → {change}" if point else f"- {change}")
+    if not results:
+        raise MemorySystemError("细纲的情节点表没有任何“必须产生的变化”。")
     return results
 
 
@@ -207,16 +239,24 @@ def normalize_item(value: str) -> str:
 
 
 def chapter_plan_target(plan_text: str, chapter: int) -> str:
-    for line in plan_text.splitlines():
-        if re.search(rf"第\s*0*{chapter}\s*章", line):
-            return line.strip()
+    matches = [line.strip() for line in plan_text.splitlines() if re.search(rf"第\s*0*{chapter}\s*章", line)]
+    if len(matches) > 1:
+        raise MemorySystemError(f"章节规划中第{chapter:03d}章存在多个候选，无法唯一选择。")
+    if matches:
+        return matches[0]
     return chapter_section(plan_text, chapter)
 
 
 def outline_atoms(project_root: Path, chapter: int, arc_path: Path, blueprint_path: Path) -> list[Atom]:
     atoms: list[Atom] = []
+    blueprint_path = assert_project_path(project_root, blueprint_path, "细纲路径")
+    arc_path = assert_project_path(project_root, arc_path, "篇纲路径")
+    plan_path = assert_project_path(project_root, project_root / "大纲" / "章节规划.md", "章节规划路径")
+    total_outline_path = assert_project_path(project_root, project_root / "大纲" / "总纲.md", "总纲路径")
     blueprint = read_text(blueprint_path)
     goals = complete_list_items(heading_section(blueprint, r"^本章目标$"))
+    if not goals:
+        raise MemorySystemError("章节细纲缺少非空的“本章目标”列表。")
     for index, item in enumerate(goals, start=1):
         atoms.append(Atom("本章目标与变化", normalize_item(item), f"blueprint:goal:{index}", 900))
 
@@ -225,6 +265,8 @@ def outline_atoms(project_root: Path, chapter: int, arc_path: Path, blueprint_pa
         atoms.append(Atom("本章目标与变化", normalize_item(item), f"blueprint:change:{index}", 850))
 
     hard_facts = complete_list_items(heading_section(blueprint, r"^不可违背事实$"))
+    if not hard_facts:
+        raise MemorySystemError("章节细纲缺少非空的“不可违背事实”列表。")
     for index, item in enumerate(hard_facts, start=1):
         atoms.append(
             Atom("不可违背规则与伏笔", normalize_item(item), f"blueprint:hard:{index}", 1000, True)
@@ -232,6 +274,8 @@ def outline_atoms(project_root: Path, chapter: int, arc_path: Path, blueprint_pa
 
     hook_section = heading_section(blueprint, r"^结尾钩子$")
     hook_blocks = complete_list_items(hook_section) or paragraph_blocks(hook_section)
+    if not hook_blocks:
+        raise MemorySystemError("章节细纲缺少非空的“结尾钩子”内容。")
     for index, item in enumerate(hook_blocks, start=1):
         atoms.append(Atom("结尾与文风提醒", normalize_item(item), f"blueprint:hook:{index}", 500))
 
@@ -243,12 +287,12 @@ def outline_atoms(project_root: Path, chapter: int, arc_path: Path, blueprint_pa
     for index, item in enumerate(complete_list_items(target_arc) or paragraph_blocks(target_arc), start=1):
         atoms.append(Atom("本章目标与变化", normalize_item(item), f"arc:chapter:{index}", 700))
 
-    plan_text = read_text(project_root / "大纲" / "章节规划.md")
+    plan_text = read_text(plan_path)
     target_plan = chapter_plan_target(plan_text, chapter)
     if target_plan:
         atoms.append(Atom("本章目标与变化", normalize_item(target_plan.strip("| ")), "chapter-plan:target", 650))
 
-    total_outline = read_text(project_root / "大纲" / "总纲.md")
+    total_outline = read_text(total_outline_path)
     for section_name in ("不可违背事实", "核心硬规则", "底层规则"):
         section = heading_section(total_outline, rf"^{section_name}$")
         for index, item in enumerate(complete_list_items(section), start=1):
@@ -304,7 +348,7 @@ def previous_summary_required(project_root: Path, index: dict, chapter: int) -> 
     previous = chapter - 1
     previous_exists = any(
         parse_chapter_number(path, read_text(path)) == previous
-        for path in (project_root / "正文").glob("*.md")
+        for path in project_files(project_root, project_root / "正文", "*.md", label="正文路径")
     )
     summaries = {int(item["chapter"]) for item in index.get("chapter_summaries", [])}
     if previous_exists and previous not in summaries:
@@ -323,7 +367,7 @@ def previous_chapter_paths(
     first = max(1, chapter - limit)
     required = list(range(first, chapter))
     matches: dict[int, list[Path]] = {number: [] for number in required}
-    for path in sorted((project_root / "正文").glob("*.md")):
+    for path in project_files(project_root, project_root / "正文", "*.md", label="前置正文路径"):
         number = parse_chapter_number(path)
         if number is None:
             number = parse_chapter_number(path, read_text(path))
@@ -483,105 +527,99 @@ def blocker_taskbook(chapter: int, records: list[MemoryRecord], budget: int) -> 
     return text
 
 
-def main() -> int:
-    args = parse_args()
-    try:
-        budget, legacy_budget = resolve_budget(args)
-        chapter, _ = normalize_chapter(args.chapter)
-        library_root = resolve_library_root(args.library_root)
-        project_root = resolve_project_root(library_root, args.project_root)
-        if inspect_transactions(project_root):
-            raise MemorySystemError("存在未完成事务。请先运行 memory_doctor.py 诊断，并显式使用 --recover。")
-        current_dir = project_root / "记忆库" / "current"
-        output = Path(args.output) if args.output else current_dir / TASKBOOK_NAME
-        output = output.resolve() if output.is_absolute() else (Path.cwd() / output).resolve()
-        output = assert_project_path(project_root, output, "任务书输出")
-        for required_name in ("总纲.md", "章节规划.md"):
-            required_path = project_root / "大纲" / required_name
-            if not required_path.is_file():
-                raise MemorySystemError(f"缺少必需大纲文件：{required_path.relative_to(project_root).as_posix()}")
-        legacy_context = current_dir / LEGACY_CONTEXT_NAME
-        if legacy_context.exists():
-            raise MemorySystemError(
-                f"仍存在旧上下文包：{legacy_context}。请先运行 memory_doctor.py --migrate-legacy。"
-            )
-        arc = select_arc_outline(project_root, chapter)
-        index = ensure_index(project_root)
-        blocker_items = [
-            item
-            for item in index.get("records", [])
-            if item.get("category") == "workflow"
-            and item.get("status") == "active"
-            and not item.get("archived")
-        ]
-        if blocker_items:
-            blockers = load_indexed_records(project_root, blocker_items)
-            taskbook = blocker_taskbook(chapter, blockers, budget)
-            taskbook_metadata = build_taskbook_metadata(
-                project_root,
-                chapter,
-                [record.path for record in blockers],
-                "blocked",
-                taskbook,
-            )
-            write_taskbook(project_root, output, taskbook, taskbook_metadata)
-            print(f"已生成阻断型写作任务书：{output}")
-            print("没有读取旧章节细纲，也没有生成正文写作材料。")
-            return 2
-
-        blueprint_path = find_blueprint(project_root, chapter)
-        if blueprint_path is None:
-            raise MemorySystemError(
-                f"找不到第{chapter:03d}章细纲。请先创建并确认 大纲/细纲_第{chapter:03d}章.md。"
-            )
-        previous_summary_required(project_root, index, chapter)
-        blueprint_text = read_text(blueprint_path)
-        arc_chapter_text = chapter_section(read_text(arc.path), chapter)
-        plan_text = read_text(project_root / "大纲" / "章节规划.md")
-        query_text = "\n".join((blueprint_text, arc_chapter_text, chapter_plan_target(plan_text, chapter)))
-        selected_items, omitted_items = rank_index_records(index, chapter, query_text=query_text, limit=20)
-        memory_records = load_indexed_records(project_root, selected_items)
-        atoms = previous_chapter_atoms(project_root, chapter)
-        atoms.extend(outline_atoms(project_root, chapter, arc.path, blueprint_path))
-        atoms.extend(memory_atom(record) for record in memory_records)
-        atoms.extend(recent_summary_atoms(index, chapter))
-        atoms.extend(
-            [
-                Atom("结尾与文风提醒", "- 正文控制在 2000—2500 字。", "style:length", 260),
-                Atom("结尾与文风提醒", "- 本章必须产生压力、选择、代价或可追踪变化。", "style:change", 250),
-                Atom("结尾与文风提醒", "- 正文不得出现“细纲、伏笔、读者、本章”等工程词。", "style:immersion", 240),
-            ]
+def build_locked(args: argparse.Namespace, project_root: Path, chapter: int, budget: int, legacy_budget: bool) -> int:
+    if inspect_transactions(project_root):
+        raise MemorySystemError("存在未完成事务。请先运行 memory_doctor.py 诊断，并显式使用 --recover。")
+    current_dir = project_root / "记忆库" / "current"
+    output = Path(args.output) if args.output else current_dir / TASKBOOK_NAME
+    output = output.resolve() if output.is_absolute() else (Path.cwd() / output).resolve()
+    output = assert_project_path(project_root, output, "任务书输出")
+    canonical_output = assert_project_path(project_root, current_dir / TASKBOOK_NAME, "任务书规范输出")
+    if output != canonical_output:
+        raise MemorySystemError(f"任务书只能写入规范路径：{canonical_output.relative_to(project_root).as_posix()}")
+    for required_name in ("总纲.md", "章节规划.md"):
+        required_path = assert_project_path(project_root, project_root / "大纲" / required_name, "必需大纲路径")
+        if not required_path.is_file():
+            raise MemorySystemError(f"缺少必需大纲文件：{required_path.relative_to(project_root).as_posix()}")
+    legacy_context = current_dir / LEGACY_CONTEXT_NAME
+    if legacy_context.exists():
+        raise MemorySystemError(
+            f"仍存在旧上下文包：{legacy_context}。请先运行 memory_doctor.py --migrate-legacy。"
         )
-        content_atoms = [atom for atom in atoms if atom.text]
-        extra_omitted_ids = [str(item["id"]) for item in omitted_items]
-        taskbook, selected, omitted = choose_atoms(
-            content_atoms,
-            budget,
-            chapter,
-            project_root,
-            arc.path.name,
-            blueprint_path.name,
-            extra_omitted_ids,
-        )
-        taskbook_sources = [
-            project_root / "大纲" / "总纲.md",
-            project_root / "大纲" / "章节规划.md",
-            arc.path,
-            blueprint_path,
-            *[path for _, path in previous_chapter_paths(project_root, chapter)],
-            *memory_source_files(project_root),
-        ]
+    arc = select_arc_outline(project_root, chapter)
+    index = ensure_index(project_root)
+    blocker_items = [
+        item
+        for item in index.get("records", [])
+        if item.get("category") == "workflow"
+        and item.get("status") == "active"
+        and not item.get("archived")
+    ]
+    if blocker_items:
+        blockers = load_indexed_records(project_root, blocker_items)
+        taskbook = blocker_taskbook(chapter, blockers, budget)
         taskbook_metadata = build_taskbook_metadata(
             project_root,
             chapter,
-            taskbook_sources,
-            "ready",
+            [record.path for record in blockers],
+            "blocked",
             taskbook,
         )
         write_taskbook(project_root, output, taskbook, taskbook_metadata)
-    except MemorySystemError as exc:
-        print(f"错误：{exc}")
+        print(f"已生成阻断型写作任务书：{output}")
+        print("没有读取旧章节细纲，也没有生成正文写作材料。")
         return 2
+
+    blueprint_path = find_blueprint(project_root, chapter)
+    if blueprint_path is None:
+        raise MemorySystemError(
+            f"找不到第{chapter:03d}章细纲。请先创建并确认 大纲/细纲_第{chapter:03d}章.md。"
+        )
+    previous_summary_required(project_root, index, chapter)
+    blueprint_text = read_text(assert_project_path(project_root, blueprint_path, "细纲路径"))
+    arc_chapter_text = chapter_section(read_text(assert_project_path(project_root, arc.path, "篇纲路径")), chapter)
+    plan_text = read_text(assert_project_path(project_root, project_root / "大纲" / "章节规划.md", "章节规划路径"))
+    query_text = "\n".join((blueprint_text, arc_chapter_text, chapter_plan_target(plan_text, chapter)))
+    selected_items, omitted_items = rank_index_records(index, chapter, query_text=query_text, limit=20)
+    memory_records = load_indexed_records(project_root, selected_items)
+    atoms = previous_chapter_atoms(project_root, chapter)
+    atoms.extend(outline_atoms(project_root, chapter, arc.path, blueprint_path))
+    atoms.extend(memory_atom(record) for record in memory_records)
+    atoms.extend(recent_summary_atoms(index, chapter))
+    atoms.extend(
+        [
+            Atom("结尾与文风提醒", "- 正文控制在 2000—2500 字。", "style:length", 260),
+            Atom("结尾与文风提醒", "- 本章必须产生压力、选择、代价或可追踪变化。", "style:change", 250),
+            Atom("结尾与文风提醒", "- 正文不得出现“细纲、伏笔、读者、本章”等工程词。", "style:immersion", 240),
+        ]
+    )
+    content_atoms = [atom for atom in atoms if atom.text]
+    extra_omitted_ids = [str(item["id"]) for item in omitted_items]
+    taskbook, selected, omitted = choose_atoms(
+        content_atoms,
+        budget,
+        chapter,
+        project_root,
+        arc.path.name,
+        blueprint_path.name,
+        extra_omitted_ids,
+    )
+    taskbook_sources = [
+        project_root / "大纲" / "总纲.md",
+        project_root / "大纲" / "章节规划.md",
+        arc.path,
+        blueprint_path,
+        *[path for _, path in previous_chapter_paths(project_root, chapter)],
+        *memory_source_files(project_root),
+    ]
+    taskbook_metadata = build_taskbook_metadata(
+        project_root,
+        chapter,
+        taskbook_sources,
+        "ready",
+        taskbook,
+    )
+    write_taskbook(project_root, output, taskbook, taskbook_metadata)
 
     print(f"已生成写作任务书：{output}")
     print(f"篇纲：{arc.path.name}（第{arc.start:03d}-{arc.end:03d}章）")
@@ -592,6 +630,23 @@ def main() -> int:
     if budget > 2000:
         print("提示：当前预算高于 2000，建议确认是否确实需要更大的单章任务书。")
     return 0
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        budget, legacy_budget = resolve_budget(args)
+        chapter, _ = normalize_chapter(args.chapter)
+        library_root = resolve_library_root(args.library_root)
+        project_root = resolve_project_root(library_root, args.project_root)
+        with project_write_lock(project_root):
+            return build_locked(args, project_root, chapter, budget, legacy_budget)
+    except MemorySystemError as exc:
+        print(f"错误：{exc}")
+        return 2
+    except OSError:
+        print("错误：生成任务书所需文件无法稳定读取或写入。")
+        return 2
 
 
 if __name__ == "__main__":

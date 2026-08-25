@@ -347,10 +347,6 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .review-severity-tabs button { display: grid; place-items: center; gap: 2px; min-width: 0; border: 0; border-radius: 8px; padding: 7px 2px; background: transparent; color: color-mix(in srgb, var(--workbench-text) 66%, var(--workbench-muted)); font-size: 12px; cursor: pointer; }
 .review-severity-tabs button.active { background: var(--workbench-solid); color: var(--workbench-text); box-shadow: 0 1px 4px rgba(20,22,25,.08); }
 .review-severity-tabs b { color: var(--workbench-blue); font-size: 11px; }
-.review-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; padding: 10px 10px 8px; border-bottom: 1px solid var(--workbench-line); }
-.review-tabs span { text-align: center; color: var(--workbench-muted); font-size: 10px; padding: 5px 1px; border-radius: 6px; white-space: nowrap; }
-.review-tabs span.active { color: var(--workbench-text); background: var(--workbench-solid); box-shadow: 0 1px 4px rgba(20,22,25,.08); }
-.review-tabs b { color: var(--workbench-blue); }
 .review-scroll { padding: 14px; }
 .context-manifest { margin-bottom: 14px; border: 1px solid var(--workbench-line); border-radius: 10px; background: var(--workbench-solid); }
 .context-manifest summary { padding: 12px 13px; color: var(--workbench-text); font-size: 13px; font-weight: 650; cursor: pointer; }
@@ -450,7 +446,6 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .engine-select select { max-width: 150px; border: 0; background: transparent; color: var(--workbench-text); font-size: 12px; }
 .composer-shortcut { color: var(--workbench-subtle); font-size: 10px; white-space: nowrap; }
 .engine-warning { width: 100%; color: var(--workbench-amber); font-size: 11px; }
-.accepted-note { display: flex; align-items: center; gap: 6px; color: var(--workbench-green); font-size: 12px; }
 .annotation-error { margin-top: 10px !important; display: flex; gap: 6px; color: var(--workbench-red) !important; font-family: inherit !important; }
 .annotation-closed-note { display: flex; align-items: flex-start; gap: 6px; margin-top: 12px; padding: 10px 11px; border-radius: 8px; background: color-mix(in srgb, var(--workbench-green-soft) 72%, var(--workbench-solid)); color: var(--workbench-green-text); font-size: 12px; line-height: 1.6; }
 .review-empty { min-height: 260px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 9px; padding: 28px; text-align: center; color: var(--workbench-muted); }
@@ -466,6 +461,7 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .modal-card header p { margin: 5px 0 0; color: var(--workbench-muted); font-size: 12px; line-height: 1.6; }
 .modal-body { padding: 18px 20px 20px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.form-error { margin: 12px 0 0; color: var(--workbench-red); font-size: 12px; }
 .field { display: grid; gap: 6px; margin-bottom: 13px; color: var(--workbench-muted); font-size: 12px; }
 .field input, .field select, .modal-form-row input { width: 100%; height: 38px; border: 1px solid var(--workbench-line-strong); border-radius: 8px; padding: 0 10px; background: var(--workbench-solid); color: var(--workbench-text); }
 .field > small { font-size: 10px; line-height: 1.55; }

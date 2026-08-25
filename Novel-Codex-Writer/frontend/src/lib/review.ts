@@ -1,4 +1,4 @@
-import type { ReviewAnnotation, ReviewFinding } from "../types";
+import type { ChapterReviewRun, ReviewAnnotation, ReviewFinding, ReviewSession } from "../types";
 
 export function buildLineSelection(anchorLine: number | undefined, clickedLine: number, shiftKey: boolean) {
   if (!shiftKey || !anchorLine) return { fromLine: clickedLine, toLine: clickedLine };
@@ -15,6 +15,14 @@ export function findActiveAnnotationAtLine(annotations: ReviewAnnotation[], line
     annotation.status !== "accepted" &&
     annotation.status !== "ignored"
   );
+}
+
+export function isAnnotationProcessable(annotation: ReviewAnnotation) {
+  return ["draft", "pending", "error", "stale"].includes(annotation.status)
+    && (
+      Boolean(annotation.comment.trim())
+      || (annotation.status === "error" && Boolean(annotation.messages?.some((message) => message.role === "user")))
+    );
 }
 
 export function reconcileAnnotationsAfterReplacement(
@@ -86,8 +94,34 @@ export function reconcileFindingsAfterReplacement(
   });
 }
 
-export function computeChapterReviewVerdict(findings: ReviewFinding[]) {
-  return findings.some((item) => (item.severity === "S1" || item.severity === "S2") && (item.status === "open" || item.status === "stale"))
+export function computeChapterReviewVerdict(findings: ReviewFinding[], status?: ChapterReviewRun["status"]) {
+  if (status === "stale") return "stale" as const;
+  if (status === "error") return "needs_changes" as const;
+  return findings.some((item) =>
+    item.verification === "pending" || item.verification === "unverified" ||
+    (item.severity === "S1" || item.severity === "S2") && (item.status === "open" || item.status === "stale")
+  )
     ? "needs_changes" as const
     : "pass" as const;
+}
+
+export function invalidateReviewSessionForRestoredDocument(session: ReviewSession, revision: string) {
+  const now = new Date().toISOString();
+  return {
+    ...session,
+    baseRevision: revision,
+    annotations: session.annotations.map((annotation) => ({
+      ...annotation,
+      status: "stale" as const,
+      suggestion: undefined,
+      error: "文档已恢复到其他版本，需要重新分析。",
+      updatedAt: now
+    })),
+    chapterReviewRuns: session.chapterReviewRuns.map((run) => ({
+      ...run,
+      status: "stale" as const,
+      verdict: "stale" as const,
+      findings: run.findings.map((finding) => ({ ...finding, status: "stale" as const }))
+    }))
+  };
 }

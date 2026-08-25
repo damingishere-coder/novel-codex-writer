@@ -1,8 +1,17 @@
 .git
+.runtime
+小说项目
 tmp
 node_modules
 frontend/node_modules
 frontend/dist
+frontend/coverage
+frontend/playwright-report
+frontend/test-results
+frontend/.e2e-library
+**/.runtime/**
+**/小说项目/**
+**/.e2e-library/**
 **/.env
 **/.env.*
 **/.DS_Store

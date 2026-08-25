@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -47,6 +49,31 @@ class ChapterCheckerSmokeTests(unittest.TestCase):
     def test_chinese_numeral_heading_is_not_silently_misread(self) -> None:
         number = CHECKER.extract_chapter_number(Path("draft.md"), "# 第十二章 风雨夜")
         self.assertIsNone(number)
+
+    def test_shared_chapter_number_fixtures_match_web_rules(self) -> None:
+        rules = json.loads((ROOT / "Novel-Codex-Writer" / "chapter-check-rules.json").read_text(encoding="utf-8"))
+        for fixture in rules["chapterNumberFixtures"]:
+            with self.subTest(path=fixture["documentPath"]):
+                path_chapter, title_chapter = CHECKER.extract_chapter_numbers(
+                    Path(fixture["documentPath"]), fixture["heading"]
+                )
+                self.assertEqual(path_chapter, fixture["pathChapter"])
+                self.assertEqual(title_chapter, fixture["titleChapter"])
+                findings = []
+                CHECKER.add_chapter_number_finding(
+                    findings, path_chapter, title_chapter, None, Path(fixture["documentPath"])
+                )
+                self.assertEqual(
+                    any(item.title == "章节号不匹配" for item in findings),
+                    fixture["expectsMismatch"],
+                )
+
+    def test_invalid_rules_are_a_stable_input_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            invalid = Path(temporary) / "rules.json"
+            invalid.write_text('{"schemaVersion": 1, "wordCount": []}', encoding="utf-8")
+            with self.assertRaisesRegex(CHECKER.MemorySystemError, "规则文件损坏"):
+                CHECKER.load_check_rules(invalid)
 
     def test_engineering_term_is_reported(self) -> None:
         findings = []

@@ -1,0 +1,14 @@
+{
+  "score": 54,
+  "grade": "D",
+  "tags": ["duplication", "legacy", "dual-format"],
+  "findings": [
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/server/api-security.ts:6","text":"validateLocalRequest 将可伪造的 Host 头当作本机证明；能到达非回环监听器的客户端可发送 Host: 127.0.0.1/localhost，并省略 Origin（17-18）绕过检查。仅在 socket 强制绑定回环时安全；若绑定 0.0.0.0、经反向代理或作为 SaaS 暴露，则没有 token/auth 边界。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/server/api-security.ts:35","text":"readJsonBody 按网络 chunk 单独执行 toString('utf8') 后再拼接（35-39）；多字节中文字符跨 chunk 时会产生替换字符，正文仍可能成功解析但内容/revision 被静默破坏。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/server/review-utils.ts:45","text":"getLineText/replaceLineRange 将超出实际行数的 from/to 静默夹到最后一行（45-57），而调用方只限制 1..100000；不存在的行会被当作末行送给 AI，anchor 也基于错误文本，导致审校错位。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/server/review-utils.ts:4","text":"AI_SUGGESTION_SCHEMA（4-19）与 ai-suggestion.schema.json 及 parseSuggestion（74-129）重复维护；该常量仅发现定义、未发现使用者，Provider schema、手写解析和客户端类型可能发生协议漂移。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/server/search-utils.ts:22","text":"matchSearchDocument 对每个查询词重复 lower-case 并扫描全文，countOccurrences 也逐词遍历（22-41、49-60）；工具本身没有 term/document 上限，多短词、大文档、多文档组合会产生 O(terms×content) CPU 和额外字符串内存。当前 API 外层虽限制 query 长度，但工具边界未封顶。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/frontend/server/review-utils.ts:41","text":"createLineAnchor 使用 shared FNV-1a 32-bit 锚点（41-43；shared/review-anchor.ts:8-15），而 revision 使用 SHA-256；碰撞可能误判会话历史未变化。当前接受建议仍精确比较 before，影响主要限于会话/陈旧提示。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/frontend/server/review-utils.ts:110","text":"parseReviewReply 同时接受旧版顶层 suggestion 与新版嵌套 suggestion/null（110-129）；这是兼容分支，但与双格式 schema 并存，缺少明确 legacy 淘汰边界。"}
+  ]
+}

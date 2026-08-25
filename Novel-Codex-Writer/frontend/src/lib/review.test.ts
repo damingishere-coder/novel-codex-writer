@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ReviewAnnotation, ReviewFinding } from "../types";
-import { buildLineSelection, computeChapterReviewVerdict, findActiveAnnotationAtLine, reconcileAnnotationsAfterReplacement, reconcileFindingsAfterReplacement } from "./review";
+import type { ReviewAnnotation, ReviewFinding, ReviewSession } from "../types";
+import { buildLineSelection, computeChapterReviewVerdict, findActiveAnnotationAtLine, invalidateReviewSessionForRestoredDocument, reconcileAnnotationsAfterReplacement, reconcileFindingsAfterReplacement } from "./review";
 
 function annotation(id: string, fromLine: number, toLine: number): ReviewAnnotation {
   return {
@@ -81,5 +81,52 @@ describe("行号选择与批注状态", () => {
   it("只有未解决的 S1/S2 阻止通过", () => {
     expect(computeChapterReviewVerdict([finding("blocking", 1, 1, "S2")])).toBe("needs_changes");
     expect(computeChapterReviewVerdict([{ ...finding("dismissed", 1, 1, "S1"), status: "dismissed", dismissalReason: "误报" }, finding("advice", 2, 2, "S3")])).toBe("pass");
+    expect(computeChapterReviewVerdict([{ ...finding("unverified", 1, 1, "S3"), status: "dismissed", verification: "unverified", dismissalReason: "暂时忽略" }])).toBe("needs_changes");
+    expect(computeChapterReviewVerdict([], "error")).toBe("needs_changes");
+    expect(computeChapterReviewVerdict([], "stale")).toBe("stale");
+  });
+
+  it("恢复旧版本后使所有正文绑定的批注、建议和整章体检失效", () => {
+    const ready = {
+      ...annotation("ready", 1, 1),
+      suggestion: {
+        decision: "change" as const,
+        severity: "S3" as const,
+        category: "language" as const,
+        before: "原文",
+        after: "改文",
+        rationale: "表达更清晰",
+        model: "test-model",
+        usage: null
+      }
+    };
+    const session: ReviewSession = {
+      schemaVersion: 4,
+      projectId: "novel-a",
+      documentPath: "正文/第001章.md",
+      baseRevision: "old",
+      sessionRevision: "session-1",
+      status: "active",
+      annotations: [ready],
+      chapterReviewRuns: [{
+        id: "run-1",
+        documentRevision: "old",
+        engine: "deepseek",
+        status: "completed",
+        verdict: "needs_changes",
+        summary: "发现问题",
+        findings: [finding("finding-1", 1, 1)],
+        contextManifest: [],
+        promptVersion: "chapter-audit@v1",
+        createdAt: "2026-07-20T00:00:00.000Z"
+      }],
+      updatedAt: "2026-07-20T00:00:00.000Z"
+    };
+
+    const invalidated = invalidateReviewSessionForRestoredDocument(session, "restored");
+    expect(invalidated.baseRevision).toBe("restored");
+    expect(invalidated.annotations[0]).toMatchObject({ status: "stale", suggestion: undefined });
+    expect(invalidated.chapterReviewRuns[0]).toMatchObject({ status: "stale", verdict: "stale" });
+    expect(invalidated.chapterReviewRuns[0].findings[0].status).toBe("stale");
   });
 });

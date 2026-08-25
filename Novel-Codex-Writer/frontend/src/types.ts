@@ -1,3 +1,5 @@
+import type { AiEngine, AiStreamEnvelope, ChapterReviewStreamEnvelope, ReasoningEffort } from "../shared/api-contract";
+
 export type GroupId =
   | "chapters"
   | "current"
@@ -81,8 +83,6 @@ export interface DocumentResponse {
 }
 
 export type WorkspaceMode = "preview" | "review" | "edit";
-export type AiEngine = "deepseek" | "codex";
-export type ReasoningEffort = "low" | "medium" | "high";
 export type AnnotationStatus = "draft" | "pending" | "running" | "ready" | "accepted" | "ignored" | "stale" | "error";
 export type ReviewSeverity = "S1" | "S2" | "S3" | "S4";
 export type ReviewFindingCategory =
@@ -146,6 +146,7 @@ export interface ReviewConversationMessage {
 export interface ReviewSourceRef {
   path: string;
   snippet: string;
+  revision?: string;
 }
 
 export interface ReviewFinding {
@@ -221,26 +222,25 @@ export interface ReviewSession {
 }
 
 export type {
+  ApiStreamError,
+  AiEngine,
   DocumentVersion,
+  ReasoningEffort,
   TrashEntry,
+  TrashRestoreResponse,
   VersionDiff,
   VersionsResponse,
   WorkflowArtifact,
   WorkflowArtifactState,
   WorkflowContextItem,
   WorkflowState,
+  WorkflowRecommendedAction,
   WorkflowStatus
 } from "../shared/api-contract";
 
-export type AiStreamEvent =
-  | { type: "started"; annotationId: string; engine: AiEngine }
-  | { type: "progress"; annotationId: string; message: string }
-  | { type: "result"; annotationId: string; engine: AiEngine; reply: string; suggestion?: AiSuggestion; anchorHash: string }
-  | { type: "error"; message: string };
+export type AiStreamEvent = AiStreamEnvelope<AiSuggestion>;
 
-export type ChapterReviewStreamEvent =
-  | { type: "started" | "local_result" | "audit_result" | "verifying" | "result"; run: ChapterReviewRun; message: string }
-  | { type: "error"; message: string; run?: ChapterReviewRun };
+export type ChapterReviewStreamEvent = ChapterReviewStreamEnvelope<ChapterReviewRun>;
 
 export interface SearchResult extends DocumentEntry {
   snippet: string;

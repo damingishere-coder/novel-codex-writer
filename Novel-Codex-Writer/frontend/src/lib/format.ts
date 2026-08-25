@@ -1,26 +1,11 @@
-import type { DocumentEntry } from "../types";
 import { createSharedLineAnchor } from "../../shared/review-anchor";
 
 export function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-export function formatBytes(size: number) {
-  if (size < 1024) return `${size} B`;
-  return `${(size / 1024).toFixed(1)} KB`;
-}
-
 export const CHAPTER_WORD_COUNT_MIN = 2000;
 export const CHAPTER_WORD_COUNT_MAX = 2500;
-
-export function formatDate(value: string) {
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(value));
-}
 
 export function formatWordCount(count: number) {
   return `${new Intl.NumberFormat("zh-CN").format(count)} 字`;
@@ -30,19 +15,6 @@ export function getChapterWordCountStatus(count: number) {
   if (count < CHAPTER_WORD_COUNT_MIN) return "short";
   if (count > CHAPTER_WORD_COUNT_MAX) return "long";
   return "valid";
-}
-
-export function formatChapterWordCountRange() {
-  return `${formatWordCount(CHAPTER_WORD_COUNT_MIN)}-${formatWordCount(CHAPTER_WORD_COUNT_MAX)}`;
-}
-
-export function shortPath(path: string) {
-  return path.replace(/^作品\/[^/]+\//, "");
-}
-
-export function describeEntry(entry?: DocumentEntry) {
-  if (!entry) return "暂无文件";
-  return `${entry.groupLabel} · ${formatBytes(entry.size)}`;
 }
 
 export function stripWebnovelMemoryMetadata(content: string) {

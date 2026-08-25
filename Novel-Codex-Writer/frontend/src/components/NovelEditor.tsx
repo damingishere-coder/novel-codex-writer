@@ -67,6 +67,13 @@ export function NovelEditor({
               event.preventDefault();
               onLineClickRef.current(view.state.doc.lineAt(line.from).number, (event as MouseEvent).shiftKey);
               return true;
+            },
+            keydown(view, line, event) {
+              const keyboardEvent = event as KeyboardEvent;
+              if (keyboardEvent.key !== "Enter" && keyboardEvent.key !== " ") return false;
+              keyboardEvent.preventDefault();
+              onLineClickRef.current(view.state.doc.lineAt(line.from).number, keyboardEvent.shiftKey);
+              return true;
             }
           }
         }),
@@ -79,6 +86,7 @@ export function NovelEditor({
         modeCompartment.of(modeExtensions(mode)),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) onChangeRef.current(update.state.doc.toString());
+          enhanceLineNumberAccessibility(update.view);
         }),
         EditorView.theme({
           "&": { height: "100%", backgroundColor: "transparent" },
@@ -113,6 +121,7 @@ export function NovelEditor({
     });
     const view = new EditorView({ state, parent: hostRef.current });
     viewRef.current = view;
+    queueMicrotask(() => enhanceLineNumberAccessibility(view));
     return () => {
       view.destroy();
       viewRef.current = undefined;
@@ -160,6 +169,16 @@ export function NovelEditor({
   }, [annotations, onRevealHandled, revealRequest]);
 
   return <div ref={hostRef} className="novel-editor h-full min-h-0" />;
+}
+
+function enhanceLineNumberAccessibility(view: EditorView) {
+  for (const element of view.dom.querySelectorAll<HTMLElement>(".cm-lineNumbers .cm-gutterElement")) {
+    const lineNumber = element.textContent?.trim();
+    if (!lineNumber || !/^\d+$/.test(lineNumber)) continue;
+    element.tabIndex = 0;
+    element.setAttribute("role", "button");
+    element.setAttribute("aria-label", `第 ${lineNumber} 行：创建或选择批注`);
+  }
 }
 
 function modeExtensions(mode: WorkspaceMode) {

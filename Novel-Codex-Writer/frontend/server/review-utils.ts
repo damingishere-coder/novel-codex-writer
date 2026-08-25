@@ -1,22 +1,6 @@
 import { createHash } from "node:crypto";
-import { createSharedLineAnchor } from "../shared/review-anchor";
-
-export const AI_SUGGESTION_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["decision", "severity", "category", "before", "after", "rationale"],
-  properties: {
-    decision: { type: "string", enum: ["change", "keep"] },
-    severity: { type: "string", enum: ["S1", "S2", "S3", "S4"] },
-    category: {
-      type: "string",
-      enum: ["outline", "continuity", "character", "timeline", "world", "foreshadowing", "pacing", "voice", "repetition", "language"]
-    },
-    before: { type: "string" },
-    after: { type: "string" },
-    rationale: { type: "string" }
-  }
-} as const;
+import { posix } from "node:path";
+import { createSharedLineAnchor } from "../shared/review-anchor.ts";
 
 export function countReadableWords(content: string) {
   const markdownText = content
@@ -39,36 +23,33 @@ export function createRevision(content: string) {
 }
 
 export function createLineAnchor(content: string, fromLine: number, toLine: number) {
+  lineRange(content, fromLine, toLine);
   return createSharedLineAnchor(content, fromLine, toLine);
 }
 
-export function getLineText(content: string, fromLine: number, toLine: number) {
+function lineRange(content: string, fromLine: number, toLine: number) {
   const lines = content.split(/\r?\n/);
-  const start = Math.max(1, Math.min(fromLine, lines.length));
-  const end = Math.max(start, Math.min(toLine, lines.length));
-  return lines.slice(start - 1, end).join("\n");
+  if (!Number.isInteger(fromLine) || !Number.isInteger(toLine) || fromLine < 1 || toLine < fromLine || toLine > lines.length) {
+    throw new RangeError("批注行号超出当前正文范围。");
+  }
+  return { lines, start: fromLine - 1, count: toLine - fromLine + 1 };
+}
+
+export function getLineText(content: string, fromLine: number, toLine: number) {
+  const { lines, start, count } = lineRange(content, fromLine, toLine);
+  return lines.slice(start, start + count).join("\n");
 }
 
 export function replaceLineRange(content: string, fromLine: number, toLine: number, replacement: string) {
-  const lines = content.split(/\r?\n/);
-  const start = Math.max(1, Math.min(fromLine, lines.length));
-  const end = Math.max(start, Math.min(toLine, lines.length));
-  lines.splice(start - 1, end - start + 1, ...replacement.split(/\r?\n/));
+  const { lines, start, count } = lineRange(content, fromLine, toLine);
+  lines.splice(start, count, ...replacement.split(/\r?\n/));
   return lines.join("\n");
 }
 
-export function makeReviewContext(content: string, fromLine: number, toLine: number, maxCharacters = 14_000) {
-  if (content.length <= maxCharacters) return content;
-
-  const lines = content.split(/\r?\n/);
-  const start = Math.max(0, fromLine - 25);
-  const end = Math.min(lines.length, toLine + 24);
-  const excerpt = lines.slice(start, end).join("\n");
-  return `[文档较长，已截取第 ${start + 1}-${end} 行]\n${excerpt}`.slice(0, maxCharacters);
-}
-
 export function safeSessionName(documentPath: string) {
-  return `${createHash("sha256").update(documentPath, "utf8").digest("hex").slice(0, 24)}.json`;
+  const normalized = posix.normalize(documentPath.replace(/\\/g, "/").replace(/^\/+/, "")).normalize("NFC");
+  const identity = process.platform === "win32" ? normalized.toLocaleLowerCase("en-US") : normalized;
+  return `${createHash("sha256").update(identity, "utf8").digest("hex").slice(0, 24)}.json`;
 }
 
 export function parseSuggestion(value: unknown, expectedBefore?: string) {
@@ -110,21 +91,16 @@ export function parseSuggestion(value: unknown, expectedBefore?: string) {
 export function parseReviewReply(value: unknown, expectedBefore: string) {
   if (!value || typeof value !== "object") return null;
   const response = value as Record<string, unknown>;
-
-  const legacySuggestion = parseSuggestion(response, expectedBefore);
-  if (legacySuggestion) {
-    return { reply: legacySuggestion.rationale, suggestion: legacySuggestion };
-  }
-
-  const nestedSuggestion = response.suggestion === null || response.suggestion === undefined
+  if (!("suggestion" in response) || typeof response.reply !== "string") return null;
+  const nestedSuggestion = response.suggestion === null
     ? undefined
-    : parseSuggestion(response.suggestion, expectedBefore) ?? undefined;
+    : parseSuggestion(response.suggestion, expectedBefore) ?? null;
+  if (nestedSuggestion === null) return null;
   const reply = typeof response.reply === "string" ? response.reply.trim() : "";
-  const normalizedReply = reply || nestedSuggestion?.rationale || "";
-  if (!normalizedReply || normalizedReply.length > 8_000) return null;
+  if (!reply || reply.length > 8_000) return null;
 
   return {
-    reply: normalizedReply,
+    reply,
     suggestion: nestedSuggestion
   };
 }

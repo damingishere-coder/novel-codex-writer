@@ -1,0 +1,18 @@
+{
+  "score": 64,
+  "grade": "C",
+  "tags": ["duplication", "bloat", "over-fit", "fallback"],
+  "findings": [
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/src/components/ReviewPanel.tsx:109","text":"批量 AI 入口只按 pending 数量决定 disabled，ReviewPanelProps 没有批处理进行中状态。首个 onProcessAll 将部分注释改为 running 但仍有其他 pending 时按钮继续可点，快速重复点击会再次调用回调并可能重复发起同一批请求。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/src/components/RecoveryPanel.tsx:44","text":"refresh 在文档路径或 revision 变化时启动请求，但没有 AbortController、请求序号或卸载保护；Promise 返回后无条件执行 setVersions/setTrash（27-36）。切换文档期间旧响应可能覆盖当前文档的版本列表。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/src/components/RecoveryPanel.tsx:59","text":"busy 只保护 refresh（25-50）；差异、历史恢复、回收站恢复和导出按钮（59-101）均无 disabled 或操作锁。重复点击可并发发起恢复/导出请求，恢复操作还可能重复写入历史。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/src/components/WorkflowPanel.tsx:23","text":"selectedLegacyPatch 只在组件首次挂载时初始化，status 或 legacyPatchChoices 变化时未重置。确认分类逻辑（65-78）会把旧章节的选择与新 choices 比较；若旧 id 不存在，新 choices 可能全部被分类为 outline_baseline。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/src/components/NovelEditor.tsx:64","text":"CodeMirror 行号 gutter 仅注册 mousedown（64-70）并调用 onLineClick，没有键盘事件、tabIndex 或可访问控件语义；键盘用户无法通过行号创建批注。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/frontend/src/components/ReviewPanel.tsx:186","text":"FindingCard 和 AnnotationCard 都通过 article 的 onClick 选择卡片（186、222），没有 role、tabIndex 或键盘事件；卡片选择/定位只能用鼠标触发，嵌套按钮可访问不能弥补主选择动作。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/frontend/src/components/WorkflowPanel.tsx:25","text":"copyForCodex 直接调用 navigator.clipboard.writeText（25-30），调用处以 void 忽略 Promise（91），没有 catch、onNotice 或手动复制 fallback。权限拒绝或 Clipboard API 不可用时用户没有反馈。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/frontend/src/components/RecoveryPanel.tsx:50","text":"刷新按钮仅包含 RefreshCw 图标，没有 title 或 aria-label；与其他带标题的图标按钮不同，屏幕阅读器可能得到空的可访问名称。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/frontend/src/components/LibrarySidebar.tsx:108","text":"搜索结果 document-row（108-111）与分组目录 document-row（134-142）重复实现标题/副标题按钮结构；后续可访问性、选中态或截断规则变更需要同步修改两处。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/frontend/src/styles.css:350","text":"review-tabs 选择器（350-353）和 accepted-note（453）在 frontend 内没有对应 JSX 使用；当前审阅筛选实际使用 review-severity-tabs，属于可确认后删除的死 CSS，增加样式体积。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/frontend/src/styles.css:248","text":".is-pane-resizing * 在所有后代上使用 !important（248-251），CodeMirror、对话和建议文本又在 269、429、435-436、454 大量使用 !important；这些覆盖会锁定级联顺序，使未来主题或组件级样式调整更脆弱。"}
+  ]
+}

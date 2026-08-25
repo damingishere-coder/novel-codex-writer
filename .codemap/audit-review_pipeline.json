@@ -1,0 +1,16 @@
+{
+  "score": 43,
+  "grade": "D",
+  "tags": ["bloat", "over-fit", "duplication", "fallback"],
+  "findings": [
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/server/chapter-review.ts:353","text":"assembleChapterReviewContext 只校验 documentPath 前缀和章节号（353-362），当前正文内容完全采用调用方传入的 content，并直接据此生成 revision、manifest 和 AI prompt（367-375）；没有读取磁盘正文或比较当前 revision，旧稿、跨稿正文可被归因到真实章节路径送审。"},
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/server/chapter-review.ts:420","text":"前置正文使用 Number.MAX_SAFE_INTEGER 作为单文件上限（420-426），不做聚合预算；二次核查还会把 current、档案库、大纲和前五章所有 Markdown 全量读入内存（550-568），仅在生成 snippet 时截断，超大历史库可能造成 Provider 上下文超限、内存峰值和过度发送小说资料。"},
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/server/chapter-review.ts:482","text":"ai-chapter-review.schema.json 要求 summary、findings 及每条 finding 的完整字段（schema:5-14），但 parseChapterAudit 只要求顶层为 object；缺少 findings 会变成空数组，缺字段的 finding 被静默跳过，所有条目无效时仍返回成功结果和默认摘要（482-520），Provider 的 malformed/partial JSON 可被当作已完成审阅。"},
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/server/ai-verification.schema.json:18","text":"sourcePaths 仅声明 array/maxItems，没有 minItems；applyVerification 对 confirmed 不要求有效来源，空或非法 sourcePaths 仍可标记 confirmed，对 unsupported 直接删除 pending finding（chapter-review.ts:620-628）。验证失败路径又将 S1/S2 降为 S3（640-647），computeVerdict 只阻塞 S1/S2（650-653），因此无证据或 Provider 失败可能完成审阅并返回 pass。"},
+    {"sev":"HIGH","loc":"Novel-Codex-Writer/frontend/server/chapter-review.ts:677","text":"normalizeChapterReviewRun 只强制 id 和 documentRevision（677-684），会丢弃无法解析的 findings 后继续生成运行记录；持久化记录若 status=completed 但 findings 缺失/损坏，会由 computeVerdict([]) 得到 pass，而不是标记数据损坏或 stale。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/server/chapter-review.ts:523","text":"deduplicateFindings 的唯一键只有 category 加上 before/evidence 去空格后的前 100 字符（523-529），忽略行号、标题、严重度和来源；同一句话在不同位置代表不同问题时会被静默合并，导致有效审阅问题丢失。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/server/chapter-review.ts:343","text":"findChapterFile 按文件名排序后返回第一个匹配章节（343-350），不检测同章多个候选；大纲或前置正文存在重复文件时会静默选择任意一个上下文，造成错章审阅，而非阻断并要求消歧。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/server/chapter-review.ts:165","text":"单文件同时承担本地规则、上下文装配、Prompt 构造、AI JSON 解析、来源检索、验证状态转换和持久化运行记录归一化（165-753），约 753 行且多个策略共享同一状态结构；预算、解析和验证策略的改动会互相耦合，维护边界偏大。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/frontend/server/chapter-review.ts:88","text":"ENGINEERING_TERMS 将本章、读者、伏笔、章节目标等通用词在正文中逐一命中即生成 S2 工程词泄漏（88-100、215-228）；正常叙事或元叙述也可能被硬性判为必须修改，规则对语境过拟合并增加误报。"}
+  ]
+}

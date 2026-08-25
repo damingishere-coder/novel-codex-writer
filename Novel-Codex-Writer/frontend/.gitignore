@@ -1,4 +1,8 @@
 node_modules/
 dist/
 .local/
+coverage/
+playwright-report/
+test-results/
+.e2e-library/
 *.log

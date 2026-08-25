@@ -6,31 +6,36 @@ from __future__ import annotations
 import argparse
 import json
 from collections import defaultdict
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
 from memory_common import (
     MemoryRecord,
     MemorySystemError,
-    append_record_to_text,
     apply_transaction,
     archive_path_for,
     build_finalization_manifest,
+    applied_patch_ledger_path,
     current_path_for,
     finalization_manifest_path,
     inspect_transactions,
     load_all_records,
     load_patch,
+    load_applied_patch_ledger,
     load_patch_history,
+    now_iso,
+    prepare_record_file_changes,
+    project_write_lock,
     project_root_from_current,
-    read_text,
     rebuild_index,
-    remove_record_blocks,
     render_patch_markdown,
     render_record,
     resolve_library_root,
     resolve_project_path,
     resolve_project_root,
+    sha256_text,
+    validate_transaction_targets,
     validate_patch,
 )
 
@@ -105,16 +110,7 @@ def prepare_changes(
         additions[target.resolve()].append(render_record(metadata, previous.content))
         report.append(f"{action} {record_id} -> {target.relative_to(project_root).as_posix()}")
 
-    changes: dict[Path, str | None] = {}
-    for path, removed_records in removals.items():
-        changes[path.resolve()] = remove_record_blocks(read_text(path), removed_records)
-    for target, blocks in additions.items():
-        content = changes.get(target, read_text(target))
-        if not content.strip():
-            content = f"# {target.stem}\n"
-        for block in blocks:
-            content = append_record_to_text(content, block)
-        changes[target] = content
+    changes = prepare_record_file_changes(project_root, removals, additions)
 
     patch_path = patch_source_path(project_root, patch).resolve()
     changes[patch_path] = render_patch_markdown(patch)
@@ -127,50 +123,84 @@ def main() -> int:
     try:
         library_root = resolve_library_root(args.library_root)
         project_root, current_dir = resolve_roots(library_root, args.current_dir)
-        pending_transactions = inspect_transactions(project_root)
-        if pending_transactions:
-            raise MemorySystemError("存在未完成事务。请先运行 memory_doctor.py --recover。")
-        patch_path = resolve_project_path(project_root, args.patch, "memory_patch 输入")
-        patch = validate_patch(load_patch(patch_path))
-
-        history = load_patch_history(project_root)
-        previous_patch = next((item for item in history if item["patch_id"] == patch["patch_id"]), None)
-        if previous_patch is not None:
-            comparable_previous = {
-                key: value
-                for key, value in previous_patch.items()
-                if key not in {"selected_by_manifest", "effective_kind"}
-            }
-            if comparable_previous != patch:
+        lock_context = nullcontext() if args.dry_run else project_write_lock(project_root)
+        with lock_context:
+            pending_transactions = inspect_transactions(project_root)
+            if pending_transactions:
+                raise MemorySystemError("存在未完成事务。请先运行 memory_doctor.py --recover。")
+            patch_path = resolve_project_path(project_root, args.patch, "memory_patch 输入")
+            patch = validate_patch(load_patch(patch_path))
+            canonical_patch_path = patch_source_path(project_root, patch).resolve()
+            if (
+                patch["schema_version"] == 2
+                and patch_path.parent == (project_root / "章节提交").resolve()
+                and patch_path.name.startswith("memory_patch_")
+                and patch_path.name != canonical_patch_path.name
+            ):
                 raise MemorySystemError(
-                    f"patch_id {patch['patch_id']} 已经使用过，但内容不同。请更换 patch_id。"
+                    f"schema v2 patch 文件名必须为规范路径：{canonical_patch_path.relative_to(project_root).as_posix()}"
                 )
-            print(f"补丁 {patch['patch_id']} 已应用过，本次幂等跳过。")
-            return 0
 
-        if patch["schema_version"] != 2:
-            raise MemorySystemError("旧版 patch 仅支持向后读取；新应用请生成 schema v2 patch。")
+            # Patch files in 章节提交 are candidates, not proof that their
+            # operations committed. Only the ledger written in the same
+            # transaction as current/archive changes is an application proof.
+            load_patch_history(project_root)
+            ledger = load_applied_patch_ledger(project_root)
+            patch_content = render_patch_markdown(patch)
+            patch_revision = sha256_text(patch_content)
+            previous_application = ledger["patches"].get(patch["patch_id"])
+            if previous_application is not None:
+                if not isinstance(previous_application, dict) or previous_application.get("revision") != patch_revision:
+                    raise MemorySystemError(
+                        f"patch_id {patch['patch_id']} 已经使用过，但内容不同。请更换 patch_id。"
+                    )
+                if not args.dry_run:
+                    # The applied ledger and current files are authoritative;
+                    # the index is a rebuildable projection. A previous run
+                    # may have committed the transaction and then failed while
+                    # rebuilding the index, so every real idempotent retry must
+                    # repair that projection before reporting success.
+                    rebuild_index(project_root)
+                print(f"补丁 {patch['patch_id']} 已应用过，本次幂等跳过；索引已校验。")
+                return 0
 
-        records = load_all_records(project_root)
-        changes, report = prepare_changes(project_root, patch, records)
-        if patch["kind"] == "chapter_result":
-            stored_patch_path = patch_source_path(project_root, patch).resolve()
-            stored_patch_content = changes[stored_patch_path]
-            assert isinstance(stored_patch_content, str)
-            manifest = build_finalization_manifest(
-                project_root,
-                patch,
-                stored_patch_path,
-                stored_patch_content,
-            )
-            manifest_path = finalization_manifest_path(project_root, int(patch["chapter"])).resolve()
-            changes[manifest_path] = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
-            report.append(f"最终化 manifest -> {manifest_path.relative_to(project_root).as_posix()}")
-        if not args.dry_run:
-            apply_transaction(project_root, changes)
-            rebuild_index(project_root)
+            if patch["schema_version"] != 2:
+                raise MemorySystemError("旧版 patch 仅支持向后读取；新应用请生成 schema v2 patch。")
+
+            records = load_all_records(project_root)
+            changes, report = prepare_changes(project_root, patch, records)
+            ledger["patches"][patch["patch_id"]] = {
+                "revision": patch_revision,
+                "kind": patch["kind"],
+                "chapter": int(patch["chapter"]),
+                "applied_at": now_iso(),
+            }
+            ledger_path = applied_patch_ledger_path(project_root).resolve()
+            changes[ledger_path] = json.dumps(ledger, ensure_ascii=False, indent=2) + "\n"
+            report.append(f"应用凭据 -> {ledger_path.relative_to(project_root).as_posix()}")
+            if patch["kind"] == "chapter_result":
+                stored_patch_path = patch_source_path(project_root, patch).resolve()
+                stored_patch_content = changes[stored_patch_path]
+                assert isinstance(stored_patch_content, str)
+                manifest = build_finalization_manifest(
+                    project_root,
+                    patch,
+                    stored_patch_path,
+                    stored_patch_content,
+                )
+                manifest_path = finalization_manifest_path(project_root, int(patch["chapter"])).resolve()
+                changes[manifest_path] = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+                report.append(f"最终化 manifest -> {manifest_path.relative_to(project_root).as_posix()}")
+            if args.dry_run:
+                validate_transaction_targets(project_root, changes)
+            else:
+                apply_transaction(project_root, changes)
+                rebuild_index(project_root)
     except MemorySystemError as exc:
         print(f"错误：{exc}")
+        return 2
+    except OSError:
+        print("错误：记忆补丁所需文件无法稳定读取或写入。")
         return 2
 
     print(f"小说目录：{project_root}")

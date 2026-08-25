@@ -24,12 +24,6 @@ if errorlevel 1 (
   )
 )
 
-call :prepare_node_image
-if errorlevel 1 (
-  pause
-  exit /b 1
-)
-
 echo Starting Novel Codex Workbench in Docker...
 docker compose up --build -d
 if errorlevel 1 (
@@ -38,21 +32,43 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo Waiting for the workbench health check...
+call :wait_for_workbench
+if errorlevel 1 (
+  echo The workbench container did not become healthy in time.
+  docker compose ps
+  docker compose logs --tail 50 web
+  pause
+  exit /b 1
+)
+
 call :share_codex_login
 
-echo Done. Opening http://localhost:5173/
-start "" "http://localhost:5173/"
-echo If the page is still loading, wait 10-20 seconds and refresh.
+echo Done. Opening http://127.0.0.1:5173/
+start "" "http://127.0.0.1:5173/"
 pause
 exit /b 0
+
+:wait_for_workbench
+for /l %%i in (1,1,90) do (
+  call :workbench_is_healthy
+  if not errorlevel 1 exit /b 0
+  timeout /t 2 /nobreak >nul
+)
+exit /b 1
+
+:workbench_is_healthy
+for /f "usebackq delims=" %%s in (`docker inspect --format "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}" novel-codex-workbench 2^>nul`) do (
+  if /i "%%s"=="healthy" exit /b 0
+)
+exit /b 1
 
 :share_codex_login
 if not exist "%USERPROFILE%\.codex\auth.json" (
   echo Codex App login was not found. DeepSeek and normal editing can still be used.
   exit /b 0
 )
-docker exec novel-codex-workbench sh -c "mkdir -p /root/.codex" >nul 2>nul
-docker cp "%USERPROFILE%\.codex\auth.json" novel-codex-workbench:/root/.codex/auth.json >nul 2>nul
+docker exec -i -u node novel-codex-workbench sh -c "umask 077; mkdir -p /home/node/.codex; cat > /home/node/.codex/auth.json" < "%USERPROFILE%\.codex\auth.json" >nul 2>nul
 if errorlevel 1 (
   echo Warning: Codex App login could not be shared with the workbench.
   exit /b 0
@@ -67,25 +83,3 @@ for /l %%i in (1,1,60) do (
   timeout /t 2 /nobreak >nul
 )
 exit /b 1
-
-:prepare_node_image
-docker image inspect novel-codex-node:22 >nul 2>nul
-if not errorlevel 1 exit /b 0
-
-docker image inspect ai-jobpilot-frontend:latest >nul 2>nul
-if not errorlevel 1 (
-  echo Preparing local Node image from an existing Docker image...
-  docker tag ai-jobpilot-frontend:latest novel-codex-node:22
-  exit /b %errorlevel%
-)
-
-echo Local Node image was not found. Trying to download node:22-alpine...
-docker pull node:22-alpine
-if errorlevel 1 (
-  echo Could not download the Node image.
-  echo Please check your network or Docker registry connection, then run this file again.
-  exit /b 1
-)
-
-docker tag node:22-alpine novel-codex-node:22
-exit /b %errorlevel%

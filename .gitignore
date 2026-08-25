@@ -19,6 +19,14 @@ tmp/
 **/dist/
 **/__pycache__/
 **/.sessions/
+**/.scannerwork/
+**/.e2e-library/
+**/coverage/
+**/playwright-report/
+**/test-results/
+.coverage
+coverage-python.xml
+**/npm-audit.json
 *.py[cod]
 *.log
 

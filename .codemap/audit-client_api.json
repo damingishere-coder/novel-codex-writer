@@ -1,0 +1,13 @@
+{
+  "score": 68,
+  "grade": "C",
+  "tags": ["any-escape", "bloat", "duplication", "fallback", "silent-except"],
+  "findings": [
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/src/lib/api.ts:28","text":"fetchJson 在检查 response.ok 前对所有响应执行 response.json().catch(() => ({}))（28-36）；成功响应遇到空体、HTML 或损坏 JSON 时会静默变成 {}，随后以 payload as T 返回，调用方拿到未经校验的伪类型数据，协议错误可能延迟到 UI 才暴露。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/src/lib/api.ts:65","text":"关键读接口 fetchLibrary、fetchVersions、fetchVersionDiff、fetchTrash（65-66、143-159）不接受 AbortSignal，而 fetchDocument、fetchSearch、fetchReviewSession、fetchWorkflowStatus 支持取消。项目切换/文档切换时消费者无法取消这些请求，旧响应可能覆盖新状态。"},
+    {"sev":"MED","loc":"Novel-Codex-Writer/frontend/src/lib/api.ts:205","text":"streamAiSuggestion 与 streamChapterReview 分别复制了几乎相同的 NDJSON 缓冲读取逻辑（205-218、238-251），每行直接 JSON.parse 后断言为 AiStreamEvent/ChapterReviewStreamEvent，没有运行时 discriminator 或字段校验；格式错误会中断整条 AI 流，未知事件也可能被下游静默忽略，协议变更容易产生漂移。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/frontend/src/lib/review.ts:20","text":"reconcileAnnotationsAfterReplacement 与 reconcileAnnotationsAfterExternalReplacement（20-67）重复实现重叠判断、stale 标记和后方行号偏移，主要差异仅是 acceptedId 与错误文案；修复边界规则需要同步维护两份逻辑。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/frontend/src/lib/format.ts:68","text":"getLineText 与 replaceLineRange 都重复 split/clamp 行范围逻辑（68-80），且 replaceLineRange 始终以 \\n 重新 join；对 CRLF 文档执行一次局部替换会把整篇正文规范化为 LF，造成不必要的全文 diff/revision 变化。"},
+    {"sev":"LOW","loc":"Novel-Codex-Writer/frontend/src/lib/format.ts:8","text":"formatBytes、formatDate、formatChapterWordCountRange、shortPath、describeEntry（8-46）在 frontend 源码中只有定义和死的内部引用，没有实际调用点；它们是可确认后删除的未使用工具导出，增加维护面。"}
+  ]
+}
