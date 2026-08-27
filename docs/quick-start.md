@@ -7,13 +7,15 @@
 建议环境：
 
 - Windows 10 或 Windows 11
-- Docker Desktop
-- 至少预留数 GB 磁盘空间用于容器与依赖
+- Node.js 20+ 与 npm
+- Python 3.10+
+- 至少预留 1 GB 磁盘空间用于依赖、版本和备份
 - 可选：Git
 - 可选：Codex App / Codex CLI
 - 可选：DeepSeek API Key
+- 可选：Docker Desktop（备用启动方式）
 
-先启动 Docker Desktop，并等待状态显示为可用。
+Windows 原生模式不要求 Docker Desktop。
 
 ## 2. 下载项目
 
@@ -35,22 +37,24 @@ cd novel-codex-writer
 
 仓库中的 [`examples/demo-novel/`](../examples/demo-novel/) 是一套完全虚构的示例，展示原始大纲、章节细纲、缩短版正文、审查报告、章节提交、memory patch 和 `current` 状态如何对应。
 
-Demo 不会自动写入你的作品库。真实作品应保存在本机 `小说项目/作品/`，该目录、`小说项目/projects.json` 和 `.trash/` 默认被 Git 忽略。
+Demo 不会自动写入你的作品库。真实作品唯一保存在本机 `Novel-Codex-Writer/小说项目/作品/`，对应 `projects.json`、`作品/` 和 `.trash/` 默认被 Git 忽略。
 
 ## 3. 启动网页工作台
 
 在项目目录中双击：
 
-- `启动网页.bat`：启动本地 Docker 服务并打开网页。
+- `启动网页.bat`：转发到程序目录，启动 Windows 原生服务并打开网页。
 - `关闭网页.bat`：停止本地服务。
 
 默认访问地址：
 
 ```text
-http://localhost:5173/
+http://127.0.0.1:5174/
 ```
 
-首次启动时 Docker 可能需要下载镜像、安装依赖和构建前端，请等待浏览器页面和容器状态稳定。
+首次启动会在 `Novel-Codex-Writer/frontend/` 安装依赖。浏览器打开后可点“启动预检”，确认 Node/npm、Python、端口、作品库、注册表、活动作品和未完成事务。AI 不可用只影响 AI 审校，不会阻止普通阅读和编辑。
+
+需要 Docker 备用模式时，运行 `Novel-Codex-Writer/start-docker.bat`，访问 `http://127.0.0.1:5173/`。
 
 ## 4. 创建第一本小说
 
@@ -93,7 +97,7 @@ http://localhost:5173/
 Codex 应先读取：
 
 ```text
-小说项目/projects.json
+Novel-Codex-Writer/小说项目/projects.json
 ```
 
 确认当前活动小说，只能在对应作品目录内操作。
@@ -147,11 +151,13 @@ Codex 不需要在项目中单独保存 API Key。启动流程会尝试使用本
 
 首次体验成功应满足：
 
-- 浏览器可以打开 `http://localhost:5173/`。
+- 浏览器可以打开 `http://127.0.0.1:5174/`。
+- 顶部“下一章写作驾驶舱”在 10 秒内说明当前章节、六步进度、阻断原因和唯一下一步。
 - 可以创建和切换小说。
 - 可以新建、编辑和保存 Markdown 文档。
 - 关闭并重新启动后，已保存内容仍然存在。
 - 没有配置 AI 时，普通编辑功能仍可使用。
+- ZIP 导入必须先预检，再由作者确认，并创建新的项目 ID。
 
 ## 10. 下一步
 
@@ -159,3 +165,4 @@ Codex 不需要在项目中单独保存 API Key。启动流程会尝试使用本
 - 阅读 [完整写作工作流](writing-workflow.md)。
 - 了解 [项目目录与数据说明](project-structure.md)。
 - 遇到问题查看 [常见问题与排错](troubleshooting.md)。
+- 开始真实连续试写前打印或复制 [10 章验收清单](ten-chapter-acceptance.md)。

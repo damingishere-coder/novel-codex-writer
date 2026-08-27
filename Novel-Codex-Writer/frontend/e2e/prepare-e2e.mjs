@@ -3,9 +3,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const frontendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const libraryRoot = resolve(frontendRoot, ".e2e-library");
+const projectRoot = resolve(frontendRoot, "..");
+const libraryRoot = resolve(projectRoot, ".e2e-library");
 
-if (dirname(libraryRoot) !== frontendRoot || !libraryRoot.endsWith(".e2e-library")) {
+if (dirname(libraryRoot) !== projectRoot || !libraryRoot.endsWith(".e2e-library")) {
   throw new Error(`Refusing to reset unexpected E2E path: ${libraryRoot}`);
 }
 

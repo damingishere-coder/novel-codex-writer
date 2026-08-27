@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useId, useRef, useState, type CSSProperties,
 import {
   ArrowLeft,
   ArrowRight,
+  Activity,
   BookOpen,
   Check,
   ChevronDown,
@@ -21,11 +22,14 @@ import {
   Settings2,
   Sun,
   Trash2,
+  Upload,
   X
 } from "lucide-react";
 import { LibrarySidebar } from "./LibrarySidebar";
 import { RecoveryPanel } from "./RecoveryPanel";
 import { WorkflowPanel } from "./WorkflowPanel";
+import { WritingCockpit } from "./WritingCockpit";
+import { MemoryPanel } from "./MemoryPanel";
 import type { AnnotationRevealRequest } from "./NovelEditor";
 import {
   CHAPTER_WORD_COUNT_MAX,
@@ -46,9 +50,11 @@ import type {
   GroupId,
   LibraryResponse,
   ProjectSummary,
+  ProjectImportPreview,
   ReviewAnnotation,
   ReviewSession,
   SearchResult,
+  SystemPreflight,
   WorkflowStatus,
   WorkspaceMode
 } from "../types";
@@ -73,7 +79,7 @@ export interface WorkbenchViewModel {
   searchError: string;
   leftCollapsed: boolean;
   rightVisible: boolean;
-  rightTab: "review" | "workflow" | "recovery";
+  rightTab: "review" | "workflow" | "memory" | "recovery";
   dark: boolean;
   openGroups: GroupId[];
   paneWidths: PaneWidths;
@@ -99,6 +105,8 @@ export interface WorkbenchViewModel {
   workflowStatus?: WorkflowStatus;
   workflowLoading: boolean;
   workflowBusy: boolean;
+  preflight?: SystemPreflight;
+  preflightOpen: boolean;
   projectManagerOpen: boolean;
   aiSettingsOpen: boolean;
   newDocumentOpen: boolean;
@@ -109,6 +117,7 @@ export interface WorkbenchViewActions {
   retry(): void;
   navigateHistory(direction: -1 | 1): void;
   openProjectManager(): void;
+  openPreflight(): void;
   setQuery(value: string): void;
   openLeftPane(): void;
   toggleLeftPane(): void;
@@ -116,7 +125,7 @@ export interface WorkbenchViewActions {
   setMode(mode: WorkspaceMode): void;
   openRightPane(): void;
   closeRightPane(): void;
-  setRightTab(tab: "review" | "workflow" | "recovery"): void;
+  setRightTab(tab: "review" | "workflow" | "memory" | "recovery"): void;
   toggleDark(): void;
   toggleGroup(id: GroupId): void;
   selectEntry(entry: DocumentEntry): void;
@@ -140,14 +149,19 @@ export interface WorkbenchViewActions {
   exportReview(): Promise<void>;
   refreshWorkflow(): void;
   runWorkflowAction(action: string, extra?: Record<string, unknown>): Promise<void>;
+  openMemorySource(path: string, line: number): void;
   documentRestored(document: DocumentResponse): void;
   libraryChanged(): Promise<void>;
   showNotice(message: string): void;
   closeError(): void;
   closeProjectManager(): void;
+  importProjectPreview(file: File): Promise<ProjectImportPreview>;
+  importProjectConfirm(token: string, name?: string): Promise<void>;
   switchProject(id: string): Promise<void>;
   createProject(name: string): Promise<void>;
   deleteProject(id: string): Promise<void>;
+  closePreflight(): void;
+  refreshPreflight(): Promise<void>;
   closeAiSettings(): void;
   saveAiSettings(settings: AiSettingsUpdate): Promise<void>;
   closeNewDocument(): void;
@@ -187,6 +201,7 @@ export function WorkbenchView({
           <strong>{model.activeProject?.name ?? "未选择作品"}</strong>
         </div>
         <button className="toolbar-button" onClick={actions.openProjectManager}><FolderCog size={16} />管理作品</button>
+        <button className="toolbar-button" onClick={actions.openPreflight}><Activity size={16} />启动预检</button>
         <label className="global-search">
           <Search size={16} />
           <input
@@ -250,6 +265,15 @@ export function WorkbenchView({
         ) : null}
 
         <section className="document-workspace">
+          <WritingCockpit
+            project={model.activeProject}
+            status={model.workflowStatus}
+            loading={model.workflowLoading}
+            busy={model.workflowBusy}
+            onAction={actions.runWorkflowAction}
+            onNotice={actions.showNotice}
+            onOpenWorkflow={() => { actions.openRightPane(); actions.setRightTab("workflow"); }}
+          />
           <div className="document-toolbar">
             <button className="mobile-menu" onClick={actions.openLeftPane} aria-label="打开资料库" title="打开资料库"><Menu size={17} /></button>
             <span className="document-kind">文档</span>
@@ -273,6 +297,13 @@ export function WorkbenchView({
           <div className="document-surface">
             {model.contentLoading ? (
               <div className="surface-state"><LoaderCircle className="animate-spin" />正在读取文档…</div>
+            ) : !model.activeProjectId ? (
+              <div className="surface-state empty-project-state">
+                <BookOpen size={28} />
+                <strong>还没有小说作品</strong>
+                <span>创建一本新小说，或从本应用导出的 ZIP 安全导入。</span>
+                <button className="primary-button" onClick={actions.openProjectManager}><Plus size={16} />创建或导入小说</button>
+              </div>
             ) : !model.document ? (
               <div className="surface-state"><FilePlus2 />请选择或新建一个 Markdown 文档</div>
             ) : model.mode === "preview" ? (
@@ -310,6 +341,7 @@ export function WorkbenchView({
             <nav className="right-tabs" aria-label="右侧工作台">
               <button className={model.rightTab === "review" ? "active" : ""} onClick={() => actions.setRightTab("review")}>审校</button>
               <button className={model.rightTab === "workflow" ? "active" : ""} onClick={() => actions.setRightTab("workflow")}>流程</button>
+              <button className={model.rightTab === "memory" ? "active" : ""} onClick={() => actions.setRightTab("memory")}>连续性</button>
               <button className={model.rightTab === "recovery" ? "active" : ""} onClick={() => actions.setRightTab("recovery")}>恢复</button>
               <button className="icon-button" onClick={actions.closeRightPane} title="关闭右栏"><X size={15} /></button>
             </nav>
@@ -345,8 +377,10 @@ export function WorkbenchView({
                 busy={model.workflowBusy}
                 onRefresh={actions.refreshWorkflow}
                 onAction={actions.runWorkflowAction}
-                onNotice={actions.showNotice}
               />
+            ) : null}
+            {model.rightTab === "memory" ? (
+              <MemoryPanel projectId={model.activeProjectId} onOpenSource={actions.openMemorySource} onNotice={actions.showNotice} />
             ) : null}
             {model.rightTab === "recovery" ? (
               <RecoveryPanel
@@ -371,7 +405,12 @@ export function WorkbenchView({
           onSwitch={actions.switchProject}
           onCreate={actions.createProject}
           onDelete={actions.deleteProject}
+          onImportPreview={actions.importProjectPreview}
+          onImportConfirm={actions.importProjectConfirm}
         />
+      ) : null}
+      {model.preflightOpen ? (
+        <PreflightDialog preflight={model.preflight} onClose={actions.closePreflight} onRefresh={actions.refreshPreflight} />
       ) : null}
       {model.aiSettingsOpen && model.aiStatus ? (
         <AiSettingsDialog status={model.aiStatus} onClose={actions.closeAiSettings} onSave={actions.saveAiSettings} />
@@ -464,18 +503,22 @@ function WordCount({ wordCount, isChapter }: { wordCount: number; isChapter: boo
   );
 }
 
-function ProjectManager({ projects, activeProjectId, onClose, onSwitch, onCreate, onDelete }: {
+function ProjectManager({ projects, activeProjectId, onClose, onSwitch, onCreate, onDelete, onImportPreview, onImportConfirm }: {
   projects: ProjectSummary[];
   activeProjectId: string;
   onClose: () => void;
   onSwitch: (id: string) => Promise<void>;
   onCreate: (name: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onImportPreview: (file: File) => Promise<ProjectImportPreview>;
+  onImportConfirm: (token: string, name?: string) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [pendingDelete, setPendingDelete] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [importPreview, setImportPreview] = useState<ProjectImportPreview>();
+  const [importName, setImportName] = useState("");
   return (
     <Modal title="管理作品" subtitle="删除会移到回收站，不会永久清除" onClose={onClose}>
       <div className="project-list">
@@ -494,6 +537,46 @@ function ProjectManager({ projects, activeProjectId, onClose, onSwitch, onCreate
         <input value={name} onChange={(event) => setName(event.target.value)} placeholder="输入新小说名称" />
         <button className="primary-button" disabled={busy || !name.trim()}><Plus size={15} />新建小说</button>
       </form>
+      <section className="project-import-card">
+        <div><strong>从 ZIP 安全导入</strong><p>先预检路径、结构和大小；确认后始终创建新项目，绝不覆盖现有作品。</p></div>
+        {!importPreview ? (
+          <label className={cn("soft-button", busy && "disabled")}><Upload size={15} />选择导出的 ZIP<input type="file" accept=".zip,application/zip" hidden disabled={busy} onChange={async (event) => {
+            const file = event.target.files?.[0];
+            event.currentTarget.value = "";
+            if (!file) return;
+            setBusy(true);
+            setActionError("");
+            try {
+              const preview = await onImportPreview(file);
+              setImportPreview(preview);
+              setImportName(preview.projectName);
+            } catch (caught) {
+              setActionError(errorMessage(caught));
+            } finally {
+              setBusy(false);
+            }
+          }} /></label>
+        ) : (
+          <div className="import-preview">
+            <dl><div><dt>原作品</dt><dd>{importPreview.projectName}</dd></div><div><dt>文件</dt><dd>{importPreview.fileCount} 个</dd></div><div><dt>内容大小</dt><dd>{Math.ceil(importPreview.totalBytes / 1024)} KiB</dd></div></dl>
+            <label className="field"><span>新项目名称</span><input value={importName} onChange={(event) => setImportName(event.target.value)} maxLength={120} /></label>
+            {importPreview.warnings.map((warning) => <p key={warning} className="setup-note">{warning}</p>)}
+            <div className="modal-actions"><button className="soft-button" disabled={busy} onClick={() => setImportPreview(undefined)}>取消导入</button><button className="primary-button" disabled={busy || !importName.trim()} onClick={async () => {
+              setBusy(true);
+              setActionError("");
+              try {
+                await onImportConfirm(importPreview.token, importName.trim());
+                setImportPreview(undefined);
+                onClose();
+              } catch (caught) {
+                setActionError(errorMessage(caught));
+              } finally {
+                setBusy(false);
+              }
+            }}>{busy ? <LoaderCircle size={15} className="animate-spin" /> : <Upload size={15} />}确认并创建新项目</button></div>
+          </div>
+        )}
+      </section>
       {pendingDelete ? (
         <div className="inline-confirm">
           <strong>确认移到回收站？</strong>
@@ -505,6 +588,43 @@ function ProjectManager({ projects, activeProjectId, onClose, onSwitch, onCreate
       {actionError ? <p className="form-error" role="alert">{actionError}</p> : null}
     </Modal>
   );
+}
+
+function PreflightDialog({ preflight, onClose, onRefresh }: {
+  preflight?: SystemPreflight;
+  onClose: () => void;
+  onRefresh: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal title="启动预检" subtitle="AI 不可用只会降级审校，不阻止阅读和编辑" onClose={onClose}>
+      {preflight ? (
+        <>
+          <div className={cn("preflight-summary", preflight.ready ? "ready" : "blocked")}>
+            <strong>{preflight.ready ? "本机写作环境已就绪" : "有阻断项需要处理"}</strong>
+            <span>{preflight.runtime.mode === "native" ? "Windows 原生" : preflight.runtime.mode === "docker" ? "Docker 备用" : "自定义"} · {preflight.runtime.host}:{preflight.runtime.port ?? "当前端口"}</span>
+          </div>
+          <div className="preflight-checks">
+            {preflight.checks.map((item) => (
+              <div key={item.id} className={`preflight-check ${item.state}`}>
+                {item.state === "pass" ? <Check size={16} /> : <CircleAlertIcon />}
+                <span><strong>{item.label}{item.blocking ? <small>必要</small> : null}</strong><p>{item.message}</p></span>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : <div className="surface-state"><LoaderCircle className="animate-spin" />正在读取本机状态…</div>}
+      <div className="modal-actions"><button className="soft-button" disabled={busy} onClick={async () => { setBusy(true); try { await onRefresh(); } finally { setBusy(false); } }}><RefreshIcon busy={busy} />重新检查</button><button className="primary-button" onClick={onClose}>进入工作台</button></div>
+    </Modal>
+  );
+}
+
+function CircleAlertIcon() {
+  return <span className="preflight-alert">!</span>;
+}
+
+function RefreshIcon({ busy }: { busy: boolean }) {
+  return <LoaderCircle size={15} className={busy ? "animate-spin" : undefined} />;
 }
 
 function AiSettingsDialog({ status, onClose, onSave }: { status: AiStatus; onClose: () => void; onSave: (settings: AiSettingsUpdate) => Promise<void> }) {

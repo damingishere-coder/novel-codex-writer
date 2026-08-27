@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,6 +12,24 @@ afterEach(async () => {
 });
 
 describe("project creation rollback", () => {
+  it("安全导入始终创建新的项目 ID，不覆盖现有作品", async () => {
+    const libraryRoot = await mkdtemp(resolve(tmpdir(), "project-import-new-id-"));
+    temporaryRoots.push(libraryRoot);
+    const projectsDir = resolve(libraryRoot, "作品");
+    const trashDir = resolve(libraryRoot, ".trash");
+    const projectsFile = resolve(libraryRoot, "projects.json");
+    await mkdir(projectsDir, { recursive: true });
+    const service = createProjectService({ libraryRoot, projectsDir, trashDir, projectsFile, skeletonDirs: ["正文"] });
+    const existing = await service.create("现有作品");
+    await writeFile(resolve(projectsDir, existing.id, "正文", "第001章.md"), "原内容", "utf8");
+
+    const imported = await service.importFiles("导入副本", [{ path: "正文/第001章.md", data: Buffer.from("导入内容") }]);
+    expect(imported.id).not.toBe(existing.id);
+    expect(await readFile(resolve(projectsDir, existing.id, "正文", "第001章.md"), "utf8")).toBe("原内容");
+    expect(await readFile(resolve(projectsDir, imported.id, "正文", "第001章.md"), "utf8")).toBe("导入内容");
+    expect((await service.loadProjectIndex()).activeProjectId).toBe(imported.id);
+  });
+
   it("rejects a projects index symlink that points outside the library", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "project-index-boundary-"));
     temporaryRoots.push(root);

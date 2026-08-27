@@ -6,9 +6,13 @@
 
 ```text
 webnovel-writer-Skill/
-├── .agents/                    # Codex Skill、规则、参考资料和辅助脚本
+├── Novel-Codex-Writer/        # 实际程序与唯一作品库
+│   ├── .agents/               # Codex Skill、规则、参考资料和辅助脚本
+│   ├── frontend/              # 网页工作台与本机 API
+│   └── 小说项目/              # 唯一作品事实源（正文默认忽略）
 ├── docs/                       # 面向用户与贡献者的文档
-├── 小说项目/                  # 作品库与每本小说的数据
+├── 启动网页.bat                # 转发到子目录的原生启动入口
+├── 关闭网页.bat                # 转发到子目录的原生关闭入口
 ├── README.md                   # 中文项目主页
 ├── README.en.md                # English project homepage
 ├── CONTRIBUTING.md             # 贡献指南
@@ -18,12 +22,12 @@ webnovel-writer-Skill/
 └── .gitignore                  # 不应提交的本地文件
 ```
 
-实际程序目录可能随版本调整，小说数据目录的兼容性应优先保证。
+仓库根目录继续作为 Git、README 和文档入口；实际程序保留在 `Novel-Codex-Writer/`。不要在根目录创建第二套 `小说项目/`。
 
 ## 作品库
 
 ```text
-小说项目/
+Novel-Codex-Writer/小说项目/
 ├── projects.json
 ├── 作品/
 ├── templates/
@@ -46,7 +50,7 @@ Agent 在读写任何小说资料前，都应先确认活动项目。
 每本小说使用一个独立项目 ID 作为目录名：
 
 ```text
-小说项目/作品/<project-id>/
+Novel-Codex-Writer/小说项目/作品/<project-id>/
 ```
 
 项目 ID 用于保证目录安全，作者通常不需要手工修改。
@@ -64,7 +68,7 @@ Agent 不应把 `.trash` 中的内容当成当前事实。
 ## 单本小说目录
 
 ```text
-小说项目/作品/<project-id>/
+Novel-Codex-Writer/小说项目/作品/<project-id>/
 ├── 大纲/
 ├── 写作规范/
 ├── 正文/
@@ -188,7 +192,7 @@ snapshot 用来减少后续读取负担，不用来替代正式正文和档案�
 重点备份：
 
 ```text
-小说项目/
+Novel-Codex-Writer/小说项目/
 ```
 
 建议：

@@ -367,6 +367,12 @@ class MemoryWorkflowTests(unittest.TestCase):
             self.assertIn("幂等跳过", second.stdout)
             self.assertEqual(digest, hashlib.sha256(current_path.read_bytes()).hexdigest())
             self.assertTrue(memory_index.exists())
+            healthy_index_digest = hashlib.sha256(memory_index.read_bytes()).hexdigest()
+
+            third = run_script("update_memory.py", "--patch", str(patch_path), "--library-root", str(library))
+            self.assertEqual(third.returncode, 0, third.stdout + third.stderr)
+            self.assertIn("幂等跳过", third.stdout)
+            self.assertEqual(healthy_index_digest, hashlib.sha256(memory_index.read_bytes()).hexdigest())
 
             patch_two = {
                 "schema_version": 2,

@@ -54,6 +54,8 @@ function model(patch: Partial<WorkbenchViewModel> = {}): WorkbenchViewModel {
     workflowStatus: undefined,
     workflowLoading: false,
     workflowBusy: false,
+    preflight: undefined,
+    preflightOpen: false,
     projectManagerOpen: false,
     aiSettingsOpen: false,
     newDocumentOpen: false,
@@ -85,5 +87,11 @@ describe("WorkbenchView", () => {
     expect(html).toContain("请选择或新建一个 Markdown 文档");
     expect(html).toContain("尚无工作流状态");
     expect(html).toContain("已保存");
+  });
+
+  it("没有作品时提供明确的创建或导入入口", () => {
+    const html = render(model({ activeProjectId: "", activeProject: undefined }));
+    expect(html).toContain("还没有小说作品");
+    expect(html).toContain("创建或导入小说");
   });
 });

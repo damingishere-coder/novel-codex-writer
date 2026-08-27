@@ -82,16 +82,18 @@ flowchart LR
 - 章节提交如何记录剧情、人物、关系和伏笔变化。
 - memory patch 如何更新 `记忆库/current/`。
 
-Demo 与真实作品目录完全分离。真实小说应保存在本机 `小说项目/作品/`，该目录和 `projects.json`、`.trash/` 已被 Git 忽略，避免误传正文。
+Demo 与真实作品目录完全分离。真实小说唯一保存在本机 `Novel-Codex-Writer/小说项目/作品/`，该目录和 `projects.json`、`.trash/` 已被 Git 忽略，避免误传正文。仓库根目录不再保留第二套空作品库。
 
 ## 快速开始
 
 ### 环境要求
 
 - Windows 10 / 11
-- Docker Desktop
+- Node.js 20+（推荐使用当前 LTS）
+- Python 3.10+
 - 可选：Codex App 或 Codex CLI，用于 Agent 深度写作与审校
 - 可选：DeepSeek API Key，用于网页中的快速审校
+- 可选：Docker Desktop，仅作为高级备用启动方式
 
 ### 1. 获取项目
 
@@ -106,10 +108,12 @@ cd novel-codex-writer
 
 在项目目录双击：
 
-- `启动网页.bat`：启动 Docker 服务并打开 `http://localhost:5173/`
+- `启动网页.bat`：启动 Windows 原生服务并打开 `http://127.0.0.1:5174/`
 - `关闭网页.bat`：停止本地服务
 
-第一次启动需要 Docker Desktop 拉取和构建依赖，完成后浏览器会进入作品库。
+根目录脚本会安全转发到 `Novel-Codex-Writer/` 内的程序。第一次启动会安装前端依赖；启动预检会显示 Node/npm、Python、端口、作品库、注册表、活动作品和未完成事务状态。AI Provider 不可用时，阅读和编辑仍然可用。
+
+Docker 备用入口位于 `Novel-Codex-Writer/start-docker.bat`，地址为 `http://127.0.0.1:5173/`。
 
 ### 3. 创建第一本小说
 
@@ -155,7 +159,7 @@ cd novel-codex-writer
 每本小说拥有独立目录，避免跨作品读取：
 
 ```text
-小说项目/作品/<项目ID>/
+Novel-Codex-Writer/小说项目/作品/<项目ID>/
 ├── 大纲/          # 原始大纲、总纲、篇纲、章节规划与章节细纲
 ├── 写作规范/      # 文风、审查和章节写法规则
 ├── 正文/          # 最终确认的章节正文
@@ -176,7 +180,7 @@ cd novel-codex-writer
 - DeepSeek 密钥只保存在本机 `.env`，网页 API 不返回真实密钥。
 - Codex 使用本机已有登录状态，不需要把账号凭据写入仓库。
 - `.env`、会话缓存、日志和构建产物已被 Git 忽略。
-- `小说项目/projects.json`、`小说项目/作品/` 和 `小说项目/.trash/` 默认不会提交到公共仓库。
+- `Novel-Codex-Writer/小说项目/projects.json`、`作品/` 和 `.trash/` 默认不会提交到公共仓库。
 - GitHub Actions 会检查敏感文件、个人作品数据、Demo schema 和 Python 基础可运行性。
 
 安全问题与密钥泄漏处理方式见 [SECURITY.md](SECURITY.md)。
@@ -185,7 +189,9 @@ cd novel-codex-writer
 
 当前版本面向本地个人创作，仍处于持续迭代阶段：
 
-- 主要启动流程针对 Windows + Docker Desktop。
+- 唯一推荐启动流程是 Windows 原生模式 `127.0.0.1:5174`；Docker `127.0.0.1:5173` 是高级备用。
+- 已提供六步章节进度、结构化唯一下一步、版本差异与恢复、回收站、Markdown/ZIP 导出、安全新项目导入和只读连续性浏览。
+- 真实同一本小说连续 10 章验收仍需由作者在私人作品库中完成，项目不会把正文复制进测试或日志。
 - Codex 和 DeepSeek 均为可选能力，实际输出质量取决于模型与作者资料。
 - 章节检查能发现确定性问题和常见写作问题，但不能替代作者判断。
 - 项目强调人工确认，不以无人值守批量生成整本小说为目标。

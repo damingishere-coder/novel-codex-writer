@@ -77,14 +77,15 @@ The goal is not unrestricted autonomous generation. The goal is a workflow that 
 
 The fully fictional [Fog Harbor Letters demo](examples/demo-novel/) shows the complete chain from rough outline to chapter outline, shortened manuscript, review report, chapter commit, memory patch, and current-state projection.
 
-The demo is stored outside the personal library. Real manuscripts belong under `小说项目/作品/`; that directory, `小说项目/projects.json`, and `小说项目/.trash/` are ignored by Git to reduce the risk of publishing private work.
+The demo is stored outside the personal library. The only personal library is `Novel-Codex-Writer/小说项目/作品/`; it, `projects.json`, and `.trash/` are ignored by Git to reduce the risk of publishing private work.
 
 ## Quick start
 
 ### Requirements
 
 - Windows 10 or 11
-- Docker Desktop
+- Node.js 20+ and Python 3.10+
+- Optional: Docker Desktop for the advanced fallback runtime
 - Optional: Codex App or Codex CLI for agent-assisted drafting and deep review
 - Optional: a DeepSeek API key for fast review inside the web workspace
 
@@ -101,7 +102,7 @@ You may also use **Code → Download ZIP** on GitHub.
 
 From the project directory, double-click:
 
-- `启动网页.bat` to start Docker and open `http://localhost:5173/`
+- `启动网页.bat` to start the recommended native Windows runtime at `http://127.0.0.1:5174/`
 - `关闭网页.bat` to stop local services
 
 The first launch may take a few minutes while Docker builds and downloads dependencies.
@@ -150,7 +151,7 @@ Extend the workspace, memory system, chapter checks, model adapters, and export 
 Each novel has an isolated directory:
 
 ```text
-小说项目/作品/<project-id>/
+Novel-Codex-Writer/小说项目/作品/<project-id>/
 ├── 大纲/          # Master, arc, chapter, and scene outlines
 ├── 写作规范/      # Style and review rules
 ├── 正文/          # Approved manuscript chapters
@@ -180,7 +181,7 @@ See [SECURITY.md](SECURITY.md) for reporting and secret-handling guidance.
 
 The project is designed for personal, local writing workflows and is still evolving:
 
-- The primary launch path targets Windows and Docker Desktop.
+- The recommended launch path is native Windows at `127.0.0.1:5174`; Docker at `127.0.0.1:5173` is an advanced fallback.
 - Codex and DeepSeek are optional; output quality depends on the model and source material.
 - Automated checks support the author but do not replace editorial judgment.
 - The project intentionally requires human confirmation instead of unattended bulk generation.

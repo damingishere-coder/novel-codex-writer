@@ -84,3 +84,20 @@ export async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
     throw new ApiError(400, "请求体不是合法 JSON。");
   }
 }
+
+export async function readBinaryBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  const declared = Number(req.headers["content-length"] ?? 0);
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new ApiError(413, `请求体不能超过 ${Math.floor(maxBytes / 1024 / 1024)} MiB。`, "REQUEST_BODY_TOO_LARGE");
+  }
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of req) {
+    const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytes += value.length;
+    if (bytes > maxBytes) throw new ApiError(413, `请求体不能超过 ${Math.floor(maxBytes / 1024 / 1024)} MiB。`, "REQUEST_BODY_TOO_LARGE");
+    chunks.push(value);
+  }
+  if (!bytes) throw new ApiError(400, "请求体不能为空。", "REQUEST_BODY_REQUIRED");
+  return Buffer.concat(chunks);
+}

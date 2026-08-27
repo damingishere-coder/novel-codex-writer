@@ -7,7 +7,8 @@ tmp/
 !**/.env.example
 
 # User-created novel library data
-# Keep personal manuscripts, project indexes, and deleted files out of the public repository.
+# The canonical library lives under Novel-Codex-Writer/小说项目. These root rules
+# also fail closed if an old launcher recreates the retired duplicate directory.
 小说项目/projects.json
 小说项目/作品/*
 !小说项目/作品/.gitkeep
@@ -19,6 +20,7 @@ tmp/
 **/dist/
 **/__pycache__/
 **/.sessions/
+**/.runtime/
 **/.scannerwork/
 **/.e2e-library/
 **/coverage/

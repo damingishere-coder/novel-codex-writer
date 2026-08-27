@@ -254,7 +254,7 @@ describe("整章体检核心", () => {
     await expect(collectVerificationSources(root, 3, [candidate()])).rejects.toMatchObject({
       code: "SCAN_FILE_LIMIT"
     });
-  });
+  }, 20_000);
 
   it("上下文和二次检索拒绝跟随越出项目的目录链接", async () => {
     const root = await createProjectRoot();

@@ -4,10 +4,11 @@
 
 当前版本已经改成“作品库”模式：同一个网页端可以创建、切换、编辑和删除多本小说。
 
-右侧工作台包含三个页签：
+启动或切换作品后，默认先显示顶部“下一章写作驾驶舱”和右侧“流程”，持续说明当前作品、目标章节、六步进度、阻断原因和一个唯一主按钮。右侧工作台包含四个页签：
 
 - “审校”：划线批注与整章审阅；结果绑定作品、文档和正文 revision。
 - “流程”：显示细纲、任务书、正文、审查、章节提交和记忆更新六步状态，并只推荐一个下一步。
+- “连续性”：只读浏览可重建索引中的人物、关系、伏笔、时间线和事实，并跳回 Markdown 来源。
 - “恢复”：查看最近 30 个唯一版本、预览差异、恢复历史、恢复回收站文件，以及导出整书 Markdown 或完整 ZIP 备份。
 
 普通编辑不依赖 AI。DeepSeek 或 Codex 暂不可用时，读取、编辑、保存、版本恢复和导出仍可使用。
@@ -22,6 +23,8 @@
 本机启动首次发现依赖缺失时会自动运行 `npm ci`。进程 PID、启动时间和日志只保存在被 Git 忽略的 `.runtime/` 目录中。Docker 作为可选回退：使用 `start-docker.bat` 和 `stop-docker.bat`；启动脚本只有在容器健康检查通过后才会打开 `http://127.0.0.1:5173/`，启动失败会显示容器状态和末尾日志。
 
 本机模式下 Codex 直接使用宿主机已有的 Codex App/CLI 登录，不复制 `auth.json`；Docker 回退脚本保留原有容器启动逻辑。
+
+工具栏“启动预检”显示 Node/npm、Python、监听端口、作品库读写、注册表、活动作品和未完成事务。AI Provider 不可用不属于启动阻断。作品管理中的 ZIP 导入采用“上传预检 → 作者确认 → 创建新项目”三段式，拒绝路径逃逸和覆盖导入。
 
 ## AI 审校（可选）
 
@@ -176,6 +179,11 @@ python .agents\skills\webnovel-writer\scripts\check_chapter.py --chapter 1
 - `GET/POST /api/versions`：列出、对比和按 `expectedRevision` 恢复文档版本。
 - `GET/POST /api/trash`：列出和恢复当前作品的回收站文件；同名冲突返回 409。
 - `POST /api/export?type=markdown|zip`：导出整书 Markdown 或当前作品完整 ZIP 备份。
+- `GET /api/system/preflight`：返回脱敏的本机启动预检，不返回密钥、正文或绝对私人路径。
+- `GET /api/memory/overview?projectId=...`：只读返回记忆索引的分类记录、来源与诊断。
+- `GET /api/project/consistency?projectId=...`：在安全预算内只报告目录、metadata、重复章节和记忆诊断，不自动修复。
+- `POST /api/projects/import/preview`：对本应用 ZIP 备份做安全预检。
+- `POST /api/projects/import/confirm`：凭短期预检 token 创建新的项目 ID，永不覆盖现有作品。
 
 文档和批注保存都要求 `expectedRevision`；并发冲突统一返回 409。API 只接受本机 Host/Origin，请求体上限 2 MiB，并拒绝路径穿越与符号链接逃逸。
 

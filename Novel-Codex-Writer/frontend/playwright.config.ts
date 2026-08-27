@@ -3,7 +3,10 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, devices } from "@playwright/test";
 
 const frontendRoot = dirname(fileURLToPath(import.meta.url));
-const libraryRoot = resolve(frontendRoot, ".e2e-library");
+// Keep the isolated library outside Vite's watched frontend root. On Windows,
+// the watcher can otherwise hold a newly imported directory during its atomic
+// staging rename and create an artificial EPERM that production never sees.
+const libraryRoot = resolve(frontendRoot, "..", ".e2e-library");
 
 export default defineConfig({
   testDir: "./e2e",

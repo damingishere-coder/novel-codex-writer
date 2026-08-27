@@ -13,6 +13,7 @@ export function useWorkflowController(input: {
   libraryReady: boolean;
   setLibrary: Dispatch<SetStateAction<LibraryResponse | undefined>>;
   onNotice(message: string): void;
+  onOpenPath(path: string): void;
 }) {
   const [status, setStatus] = useState<WorkflowStatus>();
   const [loading, setLoading] = useState(false);
@@ -125,6 +126,9 @@ export function useWorkflowController(input: {
         const nextLibrary = await fetchLibrary(projectId, controller.signal);
         if (requestId !== actionRequestIdRef.current || projectId !== activeProjectIdRef.current) return;
         input.setLibrary(nextLibrary);
+        const artifactId = action === "generate_taskbook" ? "taskbook" : action === "check_body" ? "review" : "memoryPatch";
+        const targetPath = result.status.artifacts.find((item) => item.id === artifactId)?.path;
+        if (targetPath) input.onOpenPath(targetPath);
       }
       input.onNotice(result.output?.trim().split(/\r?\n/).at(-1) ?? "工作流动作已完成");
     } catch (caught) {
@@ -136,7 +140,7 @@ export function useWorkflowController(input: {
       if (actionControllerRef.current === controller) actionControllerRef.current = undefined;
       if (requestId === actionRequestIdRef.current) setBusy(false);
     }
-  }, [input.activeProjectId, input.onNotice, input.setLibrary, status]);
+  }, [input.activeProjectId, input.onNotice, input.onOpenPath, input.setLibrary, status]);
 
   return { status, setStatus, loading, busy, refresh, runAction };
 }

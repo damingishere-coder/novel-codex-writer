@@ -6,11 +6,14 @@ import {
 } from "./components/WorkbenchView";
 import {
   createProject,
+  confirmProjectImport,
   deleteDocument,
   deleteProject,
   fetchAiStatus,
   fetchLibrary,
+  fetchSystemPreflight,
   fetchProjects,
+  previewProjectImport,
   saveDocument,
   saveDocumentRevision,
   updateAiSettings,
@@ -41,7 +44,9 @@ import type {
   GroupId,
   LibraryResponse,
   ProjectSummary,
+  ProjectImportPreview,
   ReviewSession,
+  SystemPreflight,
   WorkspaceMode
 } from "./types";
 
@@ -83,7 +88,7 @@ export function App() {
   const [query, setQuery] = useState("");
   const [leftCollapsed, setLeftCollapsed] = useState(() => localStorage.getItem("novel-left-collapsed") === "true");
   const [rightVisible, setRightVisible] = useState(true);
-  const [rightTab, setRightTab] = useState<"review" | "workflow" | "recovery">("review");
+  const [rightTab, setRightTab] = useState<"review" | "workflow" | "memory" | "recovery">("workflow");
   const [documentHistory, setDocumentHistory] = useState<string[]>([]);
   const [documentHistoryIndex, setDocumentHistoryIndex] = useState(-1);
   const [paneWidths, setPaneWidths] = useState<PaneWidths>(() => ({
@@ -99,6 +104,8 @@ export function App() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [projectManagerOpen, setProjectManagerOpen] = useState(false);
+  const [preflight, setPreflight] = useState<SystemPreflight>();
+  const [preflightOpen, setPreflightOpen] = useState(false);
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
   const [newDocumentOpen, setNewDocumentOpen] = useState(false);
   const [deleteDocumentOpen, setDeleteDocumentOpen] = useState(false);
@@ -131,6 +138,8 @@ export function App() {
 
   const activeProject = projects.find((project) => project.id === activeProjectId);
   const selectedEntry = library?.groups.flatMap((group) => group.entries).find((entry) => entry.path === selectedPath);
+  const wordCount = useMemo(() => countReadableWords(draftContent), [draftContent]);
+  const dirty = Boolean(document && normalizeLineEndings(draftContent) !== normalizeLineEndings(document.content));
   activeProjectIdRef.current = activeProjectId;
   selectionKeyRef.current = `${activeProjectId}:${selectedPath}`;
   const {
@@ -152,10 +161,9 @@ export function App() {
     libraryGeneratedAt: library?.generatedAt,
     libraryReady: Boolean(library),
     setLibrary,
-    onNotice: showNotice
+    onNotice: showNotice,
+    onOpenPath: openWorkflowArtifact
   });
-  const wordCount = useMemo(() => countReadableWords(draftContent), [draftContent]);
-  const dirty = Boolean(document && normalizeLineEndings(draftContent) !== normalizeLineEndings(document.content));
   documentHistoryRef.current = { items: documentHistory, index: documentHistoryIndex };
   const {
     selectedAnnotationId,
@@ -305,6 +313,17 @@ export function App() {
           setNotice(`AI 暂不可用，普通编辑不受影响：${getError(caught)}`);
         }
       });
+    void fetchSystemPreflight(controller.signal)
+      .then((result) => {
+        if (initializeIdRef.current !== requestId || controller.signal.aborted) return;
+        setPreflight(result);
+        if (!result.ready) setPreflightOpen(true);
+      })
+      .catch((caught) => {
+        if (initializeIdRef.current === requestId && !controller.signal.aborted) {
+          setNotice(`启动预检暂不可用：${getError(caught)}`);
+        }
+      });
     try {
       const projectPayload = await fetchProjects(controller.signal);
       if (initializeIdRef.current !== requestId || controller.signal.aborted) return;
@@ -335,6 +354,26 @@ export function App() {
       }
     }
     setSelectedPath(path);
+  }
+
+  function openWorkflowArtifact(path: string) {
+    if (path === selectedPath) return;
+    if (dirty) {
+      showNotice(`动作已完成；当前草稿未保存，暂未自动打开 ${path}`);
+      return;
+    }
+    navigateToPath(path);
+    setMode("preview");
+  }
+
+  function openMemorySource(path: string, line: number) {
+    if (path !== selectedPath && dirty) {
+      showNotice("当前草稿未保存，已保留现场；保存后再打开记忆来源。");
+      return;
+    }
+    navigateToPath(path);
+    setMode("preview");
+    showNotice(`已打开来源文档，请查看第 ${line} 行附近`);
   }
 
   function navigateDocumentHistory(direction: -1 | 1) {
@@ -373,6 +412,7 @@ export function App() {
       setDocumentHistory([]);
       setDocumentHistoryIndex(-1);
       documentHistoryRef.current = { items: [], index: -1 };
+      setRightTab("workflow");
     } catch (caught) {
       if (controller.signal.aborted) return;
       if (requestId === projectSwitchIdRef.current) showNotice(getError(caught));
@@ -416,6 +456,7 @@ export function App() {
       setDocumentHistory([]);
       setDocumentHistoryIndex(-1);
       documentHistoryRef.current = { items: [], index: -1 };
+      setRightTab("workflow");
     }
     setActiveProjectId(resolvedActive);
   }
@@ -483,6 +524,25 @@ export function App() {
     showNotice("新小说已创建");
   }
 
+  async function handleImportPreview(file: File): Promise<ProjectImportPreview> {
+    return previewProjectImport(file);
+  }
+
+  async function handleImportConfirm(token: string, name?: string) {
+    const result = await confirmProjectImport(token, name);
+    await refreshProjects(result.project?.id);
+    setRightTab("workflow");
+    showNotice("备份已作为新小说导入，原有作品没有被覆盖");
+  }
+
+  async function refreshPreflight() {
+    try {
+      setPreflight(await fetchSystemPreflight());
+    } catch (caught) {
+      showNotice(getError(caught));
+    }
+  }
+
   async function handleDeleteProject(id: string) {
     const result = await deleteProject(id);
     await refreshProjects(result.activeProjectId ?? undefined);
@@ -538,6 +598,8 @@ export function App() {
     workflowStatus,
     workflowLoading,
     workflowBusy,
+    preflight,
+    preflightOpen,
     projectManagerOpen,
     aiSettingsOpen,
     newDocumentOpen,
@@ -551,6 +613,7 @@ export function App() {
     },
     navigateHistory: navigateDocumentHistory,
     openProjectManager: () => setProjectManagerOpen(true),
+    openPreflight: () => setPreflightOpen(true),
     setQuery,
     openLeftPane: () => setLeftCollapsed(false),
     toggleLeftPane: () => setLeftCollapsed((value) => !value),
@@ -584,14 +647,19 @@ export function App() {
     exportReview: handleExport,
     refreshWorkflow: () => void refreshWorkflow(),
     runWorkflowAction: handleWorkflowAction,
+    openMemorySource,
     documentRestored: handleDocumentRestored,
     libraryChanged: handleRecoveryLibraryChanged,
     showNotice,
     closeError: () => setError(""),
     closeProjectManager: () => setProjectManagerOpen(false),
+    importProjectPreview: handleImportPreview,
+    importProjectConfirm: handleImportConfirm,
     switchProject,
     createProject: handleCreateProject,
     deleteProject: handleDeleteProject,
+    closePreflight: () => setPreflightOpen(false),
+    refreshPreflight,
     closeAiSettings: () => setAiSettingsOpen(false),
     saveAiSettings: handleSaveAiSettings,
     closeNewDocument: () => setNewDocumentOpen(false),

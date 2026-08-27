@@ -17,6 +17,10 @@ import type {
   VersionDiff,
   VersionsResponse,
   WorkflowStatus,
+  SystemPreflight,
+  MemoryOverview,
+  ProjectImportPreview,
+  ProjectConsistencyReport,
   AiSuggestion,
   ChapterReviewRun,
   ReviewContextManifestItem,
@@ -91,6 +95,27 @@ export function updateProject(projectId: string, body: { name?: string; active?:
 
 export function deleteProject(projectId: string) {
   return fetchJson<ProjectMutationResponse>(`/api/projects/${encodeURIComponent(projectId)}`, isProjectMutationResponse, jsonRequest("DELETE"));
+}
+
+export function previewProjectImport(file: File, signal?: AbortSignal) {
+  return fetchJson<ProjectImportPreview>("/api/projects/import/preview", isProjectImportPreview, {
+    method: "POST",
+    headers: { "Content-Type": "application/zip" },
+    body: file,
+    signal
+  });
+}
+
+export function confirmProjectImport(token: string, name?: string) {
+  return fetchJson<ProjectMutationResponse>(
+    "/api/projects/import/confirm",
+    isProjectMutationResponse,
+    jsonRequest("POST", { token, name })
+  );
+}
+
+export function fetchSystemPreflight(signal?: AbortSignal) {
+  return fetchJson<SystemPreflight>("/api/system/preflight", isSystemPreflight, { signal });
 }
 
 export function fetchLibrary(projectId: string, signal?: AbortSignal) {
@@ -176,6 +201,22 @@ export function runWorkflowAction(projectId: string, input: Record<string, unkno
     `/api/workflow/actions?projectId=${encodeURIComponent(projectId)}`,
     isWorkflowActionResponse,
     { ...jsonRequest("POST", input), signal }
+  );
+}
+
+export function fetchMemoryOverview(projectId: string, signal?: AbortSignal) {
+  return fetchJson<MemoryOverview>(
+    `/api/memory/overview?projectId=${encodeURIComponent(projectId)}`,
+    isMemoryOverview,
+    { signal }
+  );
+}
+
+export function fetchProjectConsistency(projectId: string, signal?: AbortSignal) {
+  return fetchJson<ProjectConsistencyReport>(
+    `/api/project/consistency?projectId=${encodeURIComponent(projectId)}`,
+    isProjectConsistencyReport,
+    { signal }
   );
 }
 
@@ -575,7 +616,7 @@ function isWorkflowContextItem(value: unknown) {
 
 function isWorkflowStatus(value: unknown): value is WorkflowStatus {
   return isRecord(value)
-    && value.schemaVersion === 1
+    && value.schemaVersion === 2
     && requiredString(value, "projectId")
     && isPositiveInteger(value.chapter)
     && ["blocked", "needs_changes", "ready", "finalized"].includes(String(value.state))
@@ -583,9 +624,101 @@ function isWorkflowStatus(value: unknown): value is WorkflowStatus {
     && value.artifacts.every(isWorkflowArtifact)
     && ["copy_to_codex", "classify_patch", "generate_taskbook", "check_body", "apply_patch"].includes(String(value.recommendedAction))
     && typeof value.recommendation === "string"
+    && isWorkflowNextStep(value.nextStep)
     && Array.isArray(value.reviewContext)
     && value.reviewContext.every(isWorkflowContextItem)
     && isStringArray(value.legacyPatchChoices);
+}
+
+function isWorkflowNextStep(value: unknown) {
+  return isRecord(value)
+    && [
+      "resolve_patch_classification", "repair_taskbook", "resolve_blocker", "create_blueprint",
+      "generate_taskbook", "draft_body", "check_body", "revise_body", "create_commit",
+      "create_memory_patch", "apply_patch", "prepare_next_chapter"
+    ].includes(String(value.id))
+    && ["server_action", "codex_prompt", "confirm_action", "open_panel"].includes(String(value.mode))
+    && requiredString(value, "label")
+    && requiredString(value, "reason")
+    && (value.serverAction === undefined || ["generate_taskbook", "check_body", "apply_patch", "classify_patch"].includes(String(value.serverAction)))
+    && optionalString(value, "targetPath")
+    && typeof value.requiresConfirmation === "boolean";
+}
+
+function isSystemPreflight(value: unknown): value is SystemPreflight {
+  return isRecord(value)
+    && value.schemaVersion === 1
+    && typeof value.ready === "boolean"
+    && isRecord(value.runtime)
+    && ["native", "docker", "custom"].includes(String(value.runtime.mode))
+    && value.runtime.host === "127.0.0.1"
+    && (value.runtime.port === null || isPositiveInteger(value.runtime.port))
+    && requiredString(value.runtime, "nodeVersion")
+    && optionalString(value.runtime, "npmVersion")
+    && optionalString(value.runtime, "pythonVersion")
+    && Array.isArray(value.checks)
+    && value.checks.every((item) => isRecord(item)
+      && requiredString(item, "id")
+      && requiredString(item, "label")
+      && ["pass", "warning", "fail"].includes(String(item.state))
+      && typeof item.blocking === "boolean"
+      && typeof item.message === "string");
+}
+
+function isProjectImportPreview(value: unknown): value is ProjectImportPreview {
+  return isRecord(value)
+    && value.schemaVersion === 1
+    && requiredString(value, "token")
+    && requiredString(value, "projectName")
+    && requiredString(value, "sourceProjectId")
+    && isNonNegativeInteger(value.fileCount)
+    && isNonNegativeInteger(value.totalBytes)
+    && isStringArray(value.warnings);
+}
+
+function isMemoryOverview(value: unknown): value is MemoryOverview {
+  return isRecord(value)
+    && value.schemaVersion === 1
+    && requiredString(value, "projectId")
+    && ["ready", "missing", "invalid", "stale"].includes(String(value.indexStatus))
+    && Array.isArray(value.records)
+    && value.records.every((item) => isRecord(item)
+      && requiredString(item, "id")
+      && requiredString(item, "category")
+      && requiredString(item, "status")
+      && typeof item.importance === "string"
+      && Array.isArray(item.entities) && item.entities.every((entry) => typeof entry === "string")
+      && Array.isArray(item.tags) && item.tags.every((entry) => typeof entry === "string")
+      && requiredString(item, "title")
+      && requiredString(item, "source")
+      && isPositiveInteger(item.line)
+      && typeof item.archived === "boolean")
+    && Array.isArray(value.chapterSummaries)
+    && value.chapterSummaries.every((item) => isRecord(item)
+      && isPositiveInteger(item.chapter)
+      && requiredString(item, "patchId")
+      && requiredString(item, "kind")
+      && typeof item.summary === "string"
+      && typeof item.endingState === "string")
+    && Array.isArray(value.diagnostics)
+    && value.diagnostics.every((item) => isRecord(item)
+      && requiredString(item, "code")
+      && (item.severity === "warning" || item.severity === "error")
+      && typeof item.message === "string");
+}
+
+function isProjectConsistencyReport(value: unknown): value is ProjectConsistencyReport {
+  return isRecord(value)
+    && value.schemaVersion === 1
+    && requiredString(value, "projectId")
+    && ["ready", "warning", "error"].includes(String(value.status))
+    && isNonNegativeInteger(value.checkedFiles)
+    && Array.isArray(value.issues)
+    && value.issues.every((item) => isRecord(item)
+      && requiredString(item, "code")
+      && (item.severity === "warning" || item.severity === "error")
+      && typeof item.message === "string"
+      && optionalString(item, "path"));
 }
 
 function isWorkflowActionResponse(value: unknown): value is { action: string; status: WorkflowStatus; output?: string } {

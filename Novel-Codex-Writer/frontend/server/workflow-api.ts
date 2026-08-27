@@ -3,7 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { readdir } from "node:fs/promises";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { ApiError, assertInsidePath, assertNoSymlinkEscape, atomicWriteJsonInside, readFileInsideLimited, revisionOf, withProjectSnapshotLock, withProjectWriteLock } from "./file-storage.ts";
-import type { WorkflowArtifact, WorkflowContextItem, WorkflowRecommendedAction, WorkflowState } from "../shared/api-contract.ts";
+import type { WorkflowArtifact, WorkflowContextItem, WorkflowNextStep, WorkflowRecommendedAction, WorkflowState } from "../shared/api-contract.ts";
 import { terminateProcessTree } from "./process-tree.ts";
 
 interface WorkflowOptions {
@@ -492,65 +492,188 @@ async function getWorkflowStatusUnlocked(options: WorkflowOptions) {
   let state: WorkflowState = "ready";
   let recommendedAction: WorkflowRecommendedAction = "copy_to_codex";
   let recommendation = "复制本章资料给 Codex，继续需要创作判断的步骤。";
+  let nextStep: WorkflowNextStep = {
+    id: "resolve_blocker",
+    mode: "codex_prompt",
+    label: "检查阻断原因",
+    reason: recommendation,
+    requiresConfirmation: false
+  };
   if (memoryPatch.status === "blocked") {
     state = "blocked";
-    recommendedAction = "classify_patch";
-    recommendation = "先确认同章旧 patch 的语义，未确认前不能写下一章。";
+    if ((memoryPatch.legacyChoices ?? []).length > 1) {
+      recommendedAction = "classify_patch";
+      recommendation = "先确认同章旧 patch 的语义，未确认前不能写下一章。";
+      nextStep = {
+        id: "resolve_patch_classification",
+        mode: "open_panel",
+        label: "确认旧 patch 分类",
+        reason: recommendation,
+        serverAction: "classify_patch",
+        requiresConfirmation: true
+      };
+    } else {
+      recommendedAction = "copy_to_codex";
+      recommendation = memoryPatch.message;
+      nextStep = {
+        id: "resolve_blocker",
+        mode: "codex_prompt",
+        label: "修复记忆更新阻断",
+        reason: recommendation,
+        targetPath: memoryPatch.path,
+        requiresConfirmation: false
+      };
+    }
   } else if (taskbook.status === "blocked") {
     state = "blocked";
     recommendedAction = "generate_taskbook";
     recommendation = "任务书记录为阻断或元数据无效，请修复来源后重新生成。";
+    nextStep = {
+      id: "repair_taskbook",
+      mode: "server_action",
+      label: "重新生成任务书",
+      reason: recommendation,
+      serverAction: "generate_taskbook",
+      targetPath: taskbook.path,
+      requiresConfirmation: false
+    };
   } else if (artifacts.some((item) => item.status === "blocked")) {
     state = "blocked";
     recommendedAction = "copy_to_codex";
     recommendation = "当前工作流存在阻断项，请先检查对应资料。";
+    const blocker = artifacts.find((item) => item.status === "blocked");
+    nextStep = {
+      id: "resolve_blocker",
+      mode: "codex_prompt",
+      label: "处理工作流阻断",
+      reason: blocker?.message ?? recommendation,
+      targetPath: blocker?.path,
+      requiresConfirmation: false
+    };
   } else if (blueprint.status === "missing") {
     state = "blocked";
     recommendedAction = "copy_to_codex";
     recommendation = `请先创建并确认第${label}章细纲。`;
+    nextStep = {
+      id: "create_blueprint",
+      mode: "codex_prompt",
+      label: `创建第${label}章细纲`,
+      reason: recommendation,
+      targetPath: `大纲/细纲_第${label}章.md`,
+      requiresConfirmation: false
+    };
   } else if (taskbook.status !== "ready") {
     state = "needs_changes";
     recommendedAction = "generate_taskbook";
     recommendation = "重新诊断并生成绑定当前来源的任务书。";
+    nextStep = {
+      id: "generate_taskbook",
+      mode: "server_action",
+      label: "生成本章任务书",
+      reason: recommendation,
+      serverAction: "generate_taskbook",
+      targetPath: "记忆库/current/本章写作任务书.md",
+      requiresConfirmation: false
+    };
   } else if (body.status === "missing") {
     state = "needs_changes";
     recommendedAction = "copy_to_codex";
     recommendation = "任务书已就绪，请复制给 Codex 创作正文。";
+    nextStep = {
+      id: "draft_body",
+      mode: "codex_prompt",
+      label: `创作第${label}章正文`,
+      reason: recommendation,
+      targetPath: `正文/第${label}章_新章节.md`,
+      requiresConfirmation: true
+    };
   } else if (review.status === "missing" || review.status === "stale") {
     state = "needs_changes";
     recommendedAction = "check_body";
     recommendation = "检查当前正文，生成绑定 revision 的审查报告。";
+    nextStep = {
+      id: "check_body",
+      mode: "server_action",
+      label: "检查当前正文",
+      reason: recommendation,
+      serverAction: "check_body",
+      targetPath: review.path,
+      requiresConfirmation: false
+    };
   } else if (review.status === "needs_changes") {
     state = "needs_changes";
     recommendedAction = "copy_to_codex";
     recommendation = "按审查 Findings 修改正文，再重新检查。";
+    nextStep = {
+      id: "revise_body",
+      mode: "codex_prompt",
+      label: "按审查结果修改正文",
+      reason: recommendation,
+      targetPath: body.path,
+      requiresConfirmation: true
+    };
   } else if (commit.status !== "ready") {
     state = "needs_changes";
     recommendedAction = "copy_to_codex";
     recommendation = "请生成绑定当前正文 revision 的章节提交记录。";
+    nextStep = {
+      id: "create_commit",
+      mode: "codex_prompt",
+      label: "生成章节提交记录",
+      reason: recommendation,
+      targetPath: `章节提交/第${label}章_commit.md`,
+      requiresConfirmation: false
+    };
   } else if (memoryPatch.status === "missing" || memoryPatch.status === "stale") {
     state = "needs_changes";
     recommendedAction = "copy_to_codex";
     recommendation = "请生成 schema v2 chapter_result patch，并先做最终化预检。";
+    nextStep = {
+      id: "create_memory_patch",
+      mode: "codex_prompt",
+      label: "生成记忆更新 patch",
+      reason: recommendation,
+      targetPath: `章节提交/memory_patch_第${label}章.md`,
+      requiresConfirmation: false
+    };
   } else if (memoryPatch.status === "ready") {
     recommendedAction = "apply_patch";
     recommendation = "所有证据已就绪；作者确认后应用 patch 完成最终化。";
+    nextStep = {
+      id: "apply_patch",
+      mode: "confirm_action",
+      label: "确认并应用记忆更新",
+      reason: recommendation,
+      serverAction: "apply_patch",
+      targetPath: memoryPatch.path,
+      requiresConfirmation: true
+    };
   } else if (memoryPatch.status === "finalized") {
     state = "finalized";
     recommendedAction = "copy_to_codex";
     recommendation = "本章已最终化，可以准备下一章。";
+    const nextLabel = String(chapter + 1).padStart(3, "0");
+    nextStep = {
+      id: "prepare_next_chapter",
+      mode: "codex_prompt",
+      label: `准备第${nextLabel}章`,
+      reason: recommendation,
+      targetPath: `大纲/细纲_第${nextLabel}章.md`,
+      requiresConfirmation: false
+    };
   }
   ensureNotAborted(options.signal);
   const context = await reviewContext(options.projectRoot, chapter, bodyPath, budget, options.signal);
   ensureNotAborted(options.signal);
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     projectId: options.projectId,
     chapter,
     state,
     artifacts,
     recommendedAction,
     recommendation,
+    nextStep,
     reviewContext: context,
     legacyPatchChoices: memoryPatch.legacyChoices ?? []
   };

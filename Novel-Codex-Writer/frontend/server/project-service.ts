@@ -1,9 +1,28 @@
 import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { lstat, mkdir, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, posix, relative, resolve, sep } from "node:path";
 import { assertInsidePath, assertNoSymlinkEscape, atomicWriteFileInside, atomicWriteJsonInside, readFileInside, withProjectSnapshotLock } from "./file-storage.ts";
 import { FileLockTimeoutError, withCrossProcessLock } from "./file-lock.ts";
 import { HttpError } from "./http-error.ts";
+import type { ImportedProjectFile } from "./project-import.ts";
+
+const WINDOWS_RENAME_RETRY_DELAYS_MS = [0, 25, 75, 150, 300, 600];
+
+async function renameDirectorySafely(source: string, destination: string) {
+  const delays = process.platform === "win32" ? WINDOWS_RENAME_RETRY_DELAYS_MS : [0];
+  for (let attempt = 0; attempt < delays.length; attempt += 1) {
+    if (delays[attempt]) await new Promise((resolveDelay) => setTimeout(resolveDelay, delays[attempt]));
+    try {
+      await rename(source, destination);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      const retryable = process.platform === "win32" && (code === "EPERM" || code === "EACCES" || code === "EBUSY");
+      if (!retryable || attempt === delays.length - 1) throw error;
+    }
+  }
+}
 
 export interface ProjectSummary {
   id: string;
@@ -183,6 +202,71 @@ export function createProjectService(options: ProjectServiceOptions) {
     });
   }
 
+  async function importFiles(nameValue: unknown, files: ImportedProjectFile[]): Promise<ProjectSummary> {
+    const name = normalizeProjectName(nameValue);
+    if (!files.length || files.length > 5_000) throw new HttpError(400, "导入文件数量无效。", "IMPORT_FILE_LIMIT");
+    if (files.reduce((total, file) => total + file.data.length, 0) > 64 * 1024 * 1024) {
+      throw new HttpError(413, "导入内容超过 64 MiB。", "IMPORT_BYTE_LIMIT");
+    }
+    assertCollectionRoot(projectsDir, "作品目录");
+    assertCollectionRoot(trashDir, "回收站目录");
+    return withProjectIndexWrite(async () => {
+      const index = await loadProjectIndex();
+      const id = createProjectId(index, projectsDir);
+      const now = new Date().toISOString();
+      const project: ProjectSummary = { id, name, root: `作品/${id}`, createdAt: now, updatedAt: now };
+      const projectRoot = getProjectRoot(project);
+      const stagingRoot = resolve(projectsDir, `.${id}.${randomUUID()}.importing`);
+      assertInside(projectsDir, stagingRoot, "导入暂存目录越界。");
+      if (await pathEntryExists(projectRoot) || await pathEntryExists(stagingRoot)) {
+        throw new HttpError(409, "导入目标已存在，请重试。", "IMPORT_TARGET_EXISTS");
+      }
+      let committed = false;
+      try {
+        await mkdir(stagingRoot, { recursive: false });
+        assertNoSymlinkEscape(projectsDir, stagingRoot);
+        for (const dir of skeletonDirs) {
+          const target = resolve(stagingRoot, dir);
+          assertInside(stagingRoot, target, "导入项目骨架目录越界。");
+          await mkdir(target, { recursive: true });
+        }
+        const normalizedPaths = new Set<string>();
+        for (const file of files) {
+          const relativePath = normalizeRelativePath(file.path);
+          const key = relativePath.toLowerCase();
+          if (relativePath === "project.json" || normalizedPaths.has(key)) {
+            throw new HttpError(400, "导入包含保留文件或重复路径。", "IMPORT_PATH_INVALID");
+          }
+          normalizedPaths.add(key);
+          const target = resolve(stagingRoot, relativePath);
+          assertInside(stagingRoot, target, "导入文件路径越界。");
+          await atomicWriteFileInside(stagingRoot, target, file.data);
+        }
+        await atomicWriteJsonInside(stagingRoot, resolve(stagingRoot, "project.json"), project);
+        await renameDirectorySafely(stagingRoot, projectRoot);
+        committed = true;
+        index.projects.push(project);
+        index.activeProjectId = project.id;
+        await saveProjectIndex(index);
+        return project;
+      } catch (error) {
+        const rollbackSource = committed ? projectRoot : stagingRoot;
+        if (await pathEntryExists(rollbackSource)) {
+          const rollbackRoot = resolve(trashDir, "projects");
+          const rollbackTarget = resolve(rollbackRoot, `${new Date().toISOString().replace(/[:.]/g, "-")}-${id}-import-failed`);
+          try {
+            await mkdir(rollbackRoot, { recursive: true });
+            assertInside(trashDir, rollbackTarget, "导入回滚路径越界。");
+            await renameDirectorySafely(rollbackSource, rollbackTarget);
+          } catch {
+            throw new HttpError(500, "导入失败，且暂存目录无法移入回收站；请检查本机文件。", "IMPORT_ROLLBACK_FAILED");
+          }
+        }
+        throw error;
+      }
+    });
+  }
+
   async function update(id: string, body: ProjectBody): Promise<ProjectSummary> {
     return withProjectIndexWrite(async () => {
       const index = await loadProjectIndex();
@@ -298,6 +382,7 @@ export function createProjectService(options: ProjectServiceOptions) {
 
   return {
     create,
+    importFiles,
     update,
     remove,
     touch,

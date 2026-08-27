@@ -47,7 +47,7 @@ import {
   withProjectWriteLock
 } from "./file-storage.ts";
 import { getWorkflowStatus, runWorkflowAction } from "./workflow-api.ts";
-import { readJsonBody, validateLocalRequest } from "./api-security.ts";
+import { readBinaryBody, readJsonBody, validateLocalRequest } from "./api-security.ts";
 import {
   HttpError,
   configureErrorRedactionRoots,
@@ -72,6 +72,10 @@ import {
 } from "./review-session-service.ts";
 import { registerNovelLibraryRoutes } from "./register-novel-routes.ts";
 import { getMetricsSnapshot, recordOperation } from "./observability.ts";
+import { getSystemPreflight } from "./system-preflight.ts";
+import { getMemoryOverview } from "./memory-overview.ts";
+import { createProjectImportService, PROJECT_IMPORT_MAX_BYTES } from "./project-import.ts";
+import { checkProjectConsistency } from "./project-consistency.ts";
 import type {
   AiEngine,
   AiStreamEnvelope,
@@ -175,6 +179,7 @@ interface ReviewChapterBody {
 const serverDir = dirname(fileURLToPath(import.meta.url));
 const frontendRoot = resolve(serverDir, "..");
 const workspaceRoot = resolve(frontendRoot, "..");
+const runtimeRoot = resolve(frontendRoot, ".runtime");
 const configuredLibraryRoot = process.env.NOVEL_LIBRARY_ROOT?.trim();
 if (configuredLibraryRoot && !isAbsolute(configuredLibraryRoot)) {
   throw new Error("NOVEL_LIBRARY_ROOT 必须是绝对路径。");
@@ -234,6 +239,12 @@ const projectService = createProjectService({
       if (key.startsWith(`${projectRoot}${sep}`)) documentCache.delete(key);
     }
   }
+});
+
+const projectImportService = createProjectImportService({
+  runtimeRoot,
+  importProject: projectService.importFiles,
+  sourceProjectIdExists: async (id) => (await projectService.loadProjectIndex()).projects.some((project) => project.id === id)
 });
 
 const documentService = createDocumentService({
@@ -334,6 +345,30 @@ export function novelLibraryPlugin(): Plugin {
     name: "novel-library-api",
     configureServer(server) {
       registerNovelLibraryRoutes(server, validateLocalRequest, [
+        { path: "/api/system/preflight", handler: async (req, res) => {
+          if ((req.method ?? "GET") !== "GET") throw new HttpError(405, "系统预检只支持读取。");
+          sendJson(res, 200, await getSystemPreflight({
+            libraryRoot,
+            port: req.socket.localPort,
+            loadProjectIndex,
+            getProjectRoot
+          }));
+        } },
+        { path: "/api/projects/import/preview", handler: async (req, res) => {
+          if ((req.method ?? "GET") !== "POST") throw new HttpError(405, "导入预检只支持上传 ZIP。");
+          const contentType = `${req.headers["content-type"] ?? ""}`.toLowerCase();
+          if (!contentType.startsWith("application/zip") && !contentType.startsWith("application/octet-stream")) {
+            throw new HttpError(415, "请选择由本应用导出的 ZIP 备份。", "IMPORT_CONTENT_TYPE_INVALID");
+          }
+          const preview = await projectImportService.preview(await readBinaryBody(req, PROJECT_IMPORT_MAX_BYTES));
+          sendJson(res, 200, preview);
+        } },
+        { path: "/api/projects/import/confirm", handler: async (req, res) => {
+          if ((req.method ?? "GET") !== "POST") throw new HttpError(405, "导入确认只支持 POST。");
+          const body = await readJsonBody<{ token?: unknown; name?: unknown }>(req);
+          const project = await projectImportService.confirm(body.token, body.name);
+          sendJson(res, 201, { project, ...(await getProjectListPayload()) });
+        } },
         { path: "/api/projects", handler: handleProjects },
         { path: "/api/library", handler: async (req, res) => {
           const project = await selectProject(req);
@@ -371,6 +406,16 @@ export function novelLibraryPlugin(): Plugin {
             classifications,
             signal
           }));
+        } },
+        { path: "/api/memory/overview", handler: async (req, res) => {
+          if ((req.method ?? "GET") !== "GET") throw new HttpError(405, "连续性浏览器只支持读取。");
+          const project = await selectProject(req);
+          sendJson(res, 200, await getMemoryOverview(getProjectRoot(project), project.id));
+        } },
+        { path: "/api/project/consistency", handler: async (req, res) => {
+          if ((req.method ?? "GET") !== "GET") throw new HttpError(405, "项目一致性检查只支持读取。");
+          const project = await selectProject(req);
+          sendJson(res, 200, await checkProjectConsistency(getProjectRoot(project), project.id));
         } },
         { path: "/api/search", handler: async (req, res) => {
           const url = getRequestUrl(req);

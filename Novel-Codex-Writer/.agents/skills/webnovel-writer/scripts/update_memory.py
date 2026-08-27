@@ -19,6 +19,7 @@ from memory_common import (
     applied_patch_ledger_path,
     current_path_for,
     finalization_manifest_path,
+    ensure_index,
     inspect_transactions,
     load_all_records,
     load_patch,
@@ -160,7 +161,7 @@ def main() -> int:
                     # may have committed the transaction and then failed while
                     # rebuilding the index, so every real idempotent retry must
                     # repair that projection before reporting success.
-                    rebuild_index(project_root)
+                    ensure_index(project_root)
                 print(f"补丁 {patch['patch_id']} 已应用过，本次幂等跳过；索引已校验。")
                 return 0
 

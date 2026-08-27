@@ -1,7 +1,7 @@
 import { Readable } from "node:stream";
 import type { IncomingMessage } from "node:http";
 import { describe, expect, it } from "vitest";
-import { MAX_REQUEST_BODY_BYTES, readJsonBody, validateLocalRequest } from "./api-security";
+import { MAX_REQUEST_BODY_BYTES, readBinaryBody, readJsonBody, validateLocalRequest } from "./api-security";
 
 function request(chunks: Array<string | Buffer>, headers: IncomingMessage["headers"] = {}, remoteAddress = "127.0.0.1") {
   return Object.assign(Readable.from(chunks), { headers, socket: { remoteAddress } }) as unknown as IncomingMessage;
@@ -56,5 +56,11 @@ describe("local API boundary", () => {
       encoded.subarray(11, 12),
       encoded.subarray(12)
     ]))).resolves.toEqual({ value: "中文" });
+  });
+
+  it("按独立预算读取 ZIP 二进制请求体", async () => {
+    await expect(readBinaryBody(request([Buffer.from([0, 1]), Buffer.from([2, 3])]), 4)).resolves.toEqual(Buffer.from([0, 1, 2, 3]));
+    await expect(readBinaryBody(request([Buffer.alloc(5)]), 4)).rejects.toMatchObject({ statusCode: 413, code: "REQUEST_BODY_TOO_LARGE" });
+    await expect(readBinaryBody(request([]), 4)).rejects.toMatchObject({ statusCode: 400, code: "REQUEST_BODY_REQUIRED" });
   });
 });

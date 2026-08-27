@@ -1,4 +1,4 @@
-import { CheckCircle2, CircleAlert, Clipboard, LoaderCircle, RefreshCw, ShieldCheck } from "lucide-react";
+import { CheckCircle2, CircleAlert, LoaderCircle, RefreshCw, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { WorkflowStatus } from "../types";
 
@@ -8,7 +8,6 @@ interface WorkflowPanelProps {
   busy: boolean;
   onRefresh: () => void;
   onAction: (action: string, extra?: Record<string, unknown>) => Promise<void>;
-  onNotice: (message: string) => void;
 }
 
 const statusLabels = {
@@ -20,25 +19,12 @@ const statusLabels = {
   finalized: "已最终化"
 } as const;
 
-export function WorkflowPanel({ status, loading, busy, onRefresh, onAction, onNotice }: WorkflowPanelProps) {
+export function WorkflowPanel({ status, loading, busy, onRefresh, onAction }: WorkflowPanelProps) {
   const [selectedLegacyPatch, setSelectedLegacyPatch] = useState("");
 
   useEffect(() => {
     setSelectedLegacyPatch((current) => status?.legacyPatchChoices.includes(current) ? current : "");
   }, [status?.chapter, status?.legacyPatchChoices]);
-
-  async function copyForCodex() {
-    if (!status) return;
-    const sources = status.reviewContext.map((item) => `- ${item.role}: ${item.path} @ ${item.revision?.slice(0, 12) ?? "missing"}`).join("\n");
-    try {
-      await navigator.clipboard.writeText(
-        `请使用 webnovel-writer Skill 继续第${String(status.chapter).padStart(3, "0")}章。\n当前建议：${status.recommendation}\n上下文清单：\n${sources}`
-      );
-      onNotice("已复制给 Codex");
-    } catch (error) {
-      onNotice(error instanceof Error ? `复制失败：${error.message}` : "复制失败：浏览器未授权访问剪贴板");
-    }
-  }
 
   if (loading) return <div className="surface-state"><LoaderCircle className="animate-spin" />正在诊断创作进度…</div>;
   if (!status) return <div className="surface-state">尚无工作流状态</div>;
@@ -69,7 +55,7 @@ export function WorkflowPanel({ status, loading, busy, onRefresh, onAction, onNo
 
       <div className={`workflow-recommendation ${status.state}`}>
         <ShieldCheck size={18} />
-        <div><strong>唯一推荐下一步</strong><p>{status.recommendation}</p></div>
+        <div><strong>{status.nextStep.label}</strong><p>{status.nextStep.reason}</p></div>
       </div>
 
       {status.legacyPatchChoices.length > 1 ? (
@@ -80,7 +66,7 @@ export function WorkflowPanel({ status, loading, busy, onRefresh, onAction, onNo
             {status.legacyPatchChoices.map((id) => <option key={id} value={id}>{id}</option>)}
           </select>
           <button
-            className="primary-button"
+            className="soft-button"
             disabled={!selectedLegacyPatch || busy}
             onClick={() => onAction("classify_patch", {
               confirmed: true,
@@ -90,19 +76,17 @@ export function WorkflowPanel({ status, loading, busy, onRefresh, onAction, onNo
         </div>
       ) : null}
 
-      <div className="workflow-actions">
-        <button className="soft-button" disabled={busy} onClick={() => onAction("diagnose")}><RefreshCw size={15} />重新诊断</button>
-        <button className="soft-button" disabled={busy} onClick={() => onAction("generate_taskbook")}>生成任务书</button>
-        <button className="soft-button" disabled={busy || !status.artifacts.some((item) => item.id === "body" && item.status === "ready")} onClick={() => onAction("check_body")}>检查正文</button>
-        <button className="soft-button" disabled={busy} onClick={() => onAction("finalization_preflight")}>最终化预检</button>
-        {patch?.status === "ready" && patch.path ? (
-          <button className="primary-button" disabled={busy} onClick={() => onAction("apply_patch", { patchPath: patch.path, confirmed: true })}>应用已确认 patch</button>
-        ) : null}
-        <button className="soft-button" disabled={busy} onClick={() => void copyForCodex()}><Clipboard size={15} />复制给 Codex</button>
-      </div>
-
-      <details className="workflow-context">
-        <summary>本次审阅上下文清单（{status.reviewContext.length}）</summary>
+      <details className="workflow-context workflow-advanced">
+        <summary>高级操作与诊断</summary>
+        <p className="advanced-note">这些操作用于排错，不会替代上方唯一主按钮。</p>
+        <div className="workflow-actions">
+          <button className="soft-button" disabled={busy} onClick={() => onAction("diagnose")}><RefreshCw size={15} />重新诊断</button>
+          <button className="soft-button" disabled={busy} onClick={() => onAction("generate_taskbook")}>重建任务书</button>
+          <button className="soft-button" disabled={busy || !status.artifacts.some((item) => item.id === "body" && item.status === "ready")} onClick={() => onAction("check_body")}>重新检查正文</button>
+          <button className="soft-button" disabled={busy} onClick={() => onAction("finalization_preflight")}>最终化预检</button>
+          {patch?.status === "ready" && patch.path ? <small>待确认 patch：<code>{patch.path}</code></small> : null}
+        </div>
+        <strong>本次审阅上下文清单（{status.reviewContext.length}）</strong>
         {status.reviewContext.map((item) => (
           <div key={`${item.role}-${item.path}`} className={item.missing || item.stale ? "context-stale" : ""}>
             <strong>{item.role}</strong><code>{item.path}</code><small>{item.missing ? "缺失" : item.stale ? "revision 已变化" : item.revision?.slice(0, 12)}</small>
