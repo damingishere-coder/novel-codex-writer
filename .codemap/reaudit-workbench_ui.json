@@ -1,0 +1,12 @@
+{
+  "score": 88,
+  "grade": "B",
+  "tags": ["bloat"],
+  "findings": [
+    {
+      "sev": "MED",
+      "loc": "Novel-Codex-Writer/frontend/src/components/WorkbenchView.tsx:66",
+      "text": "WorkbenchView.tsx 已达 729 行；模型定义约 50 个状态字段和约 39 个动作，同时编排主工作台、侧栏、编辑器、预览、右栏、项目 CRUD、ZIP 导入、预检、AI 设置和多种弹窗。当前行为未见错误，但变更影响面和耦合度已实质偏高。"
+    }
+  ]
+}

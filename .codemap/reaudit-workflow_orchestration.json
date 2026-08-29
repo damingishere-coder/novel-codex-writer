@@ -1,0 +1,37 @@
+{
+  "score": 48,
+  "grade": "D",
+  "tags": ["duplication", "bloat", "god-component", "legacy"],
+  "findings": [
+    {
+      "sev": "HIGH",
+      "loc": "Novel-Codex-Writer/frontend/server/workflow-api.ts:135",
+      "text": "任务书门禁只验证 chapter、taskbook_revision 和 sources 为数组，允许 sources=[] 且 status=ready 的非空任务书直接 ready，也未校验 metadata schema 或必需来源；后续最终化只把任务书本体当 source revision，不重新验证任务书 metadata，违反 fail-closed 目标。"
+    },
+    {
+      "sev": "MED",
+      "loc": "Novel-Codex-Writer/frontend/server/workflow-api.ts:197",
+      "text": "isValidReviewProof 将空对象 context_revisions={} 判为有效，也未要求当前正文出现在其中；工作流状态可把缺少审阅上下文的 proof 标为 ready，随后由 Python canonical validator 才拒绝。"
+    },
+    {
+      "sev": "MED",
+      "loc": "Novel-Codex-Writer/frontend/server/workflow-api.ts:203",
+      "text": "TypeScript 重复实现 review proof 与 chapter-result evidence 校验，而 canonical 逻辑位于 memory_patch_schema.py；两者已在 context_revisions 非空和正文绑定要求上发生漂移，形成协议双事实源。"
+    },
+    {
+      "sev": "MED",
+      "loc": "Novel-Codex-Writer/frontend/server/workflow-api.ts:446",
+      "text": "约 900 行文件同时承担 artifact 扫描、状态机、证据校验、Python 解释器发现、子进程生命周期和动作分发，高耦合已直接放大校验漂移。"
+    },
+    {
+      "sev": "MED",
+      "loc": "Novel-Codex-Writer/frontend/server/workflow-api.ts:702",
+      "text": "Windows 请求路径使用 spawnSync 探测 py.exe，失败不缓存；launcher 异常时每次工作流动作都可能同步阻塞 Node 事件循环最多 10 秒。"
+    },
+    {
+      "sev": "LOW",
+      "loc": "Novel-Codex-Writer/frontend/server/workflow-api.ts:294",
+      "text": "仍保留 schema v1、legacy_unknown 和旧 patch_classifications 兼容读取及迁移写入；当前为有界只读兼容，但继续增加协议维护面。"
+    }
+  ]
+}

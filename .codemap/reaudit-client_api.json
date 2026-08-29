@@ -1,0 +1,12 @@
+{
+  "score": 84,
+  "grade": "B",
+  "tags": ["over-fit"],
+  "findings": [
+    {
+      "sev": "MED",
+      "loc": "Novel-Codex-Writer/frontend/src/lib/format.ts:40",
+      "text": "getLineText 与 replaceLineRange 会把超出当前正文范围的行号静默裁剪到最后一行，而不是拒绝失效区间。调用方在比较裁剪后的文本后执行替换；若旧批注行号已越界且 before 恰好等于当前末行，作者确认后可能把建议写到错误的最后一行。现有测试仅覆盖有效行号。"
+    }
+  ]
+}
