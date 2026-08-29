@@ -1,7 +1,7 @@
 {
   "lang": "zh",
   "project": "webnovel-writer Skill",
-  "subtitle": "V1 工程体检：Codemap + Code Overhaul + SonarQube",
+  "subtitle": "整改后第二次工程复检：Codemap + Code Overhaul + SonarQube",
   "outputDir": ".codemap",
   "htmlFile": "codemap.html",
   "mdFile": "codemap.md"

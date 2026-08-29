@@ -1,0 +1,17 @@
+{
+  "score": 58,
+  "grade": "D",
+  "tags": ["bloat", "god-component"],
+  "findings": [
+    {
+      "sev": "HIGH",
+      "loc": "Novel-Codex-Writer/frontend/src/hooks/useWorkflowController.ts:108",
+      "text": "工作流动作完成后由请求启动时捕获的异步闭包调用 onOpenPath；请求期间只校验 project/chapter workflowKey，没有校验当前 draft revision 或 dirty 状态。用户启动长动作后继续编辑时，旧闭包仍可能认为 dirty=false，自动切换到产物并覆盖未保存草稿现场。"
+    },
+    {
+      "sev": "MED",
+      "loc": "Novel-Codex-Writer/frontend/src/App.tsx:78",
+      "text": "App 仍集中维护约 600 行全局状态、异步初始化、文档/项目导航、保存恢复、导入、AI 设置、工作流和大量 action wiring；此前虽已提取 hooks，但根组件仍承担过宽的可变状态边界，上述 stale-closure 是其具体回归。"
+    }
+  ]
+}
