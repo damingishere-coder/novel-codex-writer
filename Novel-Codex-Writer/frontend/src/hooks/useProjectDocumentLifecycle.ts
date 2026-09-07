@@ -3,6 +3,8 @@ import { fetchDocument, fetchLibrary, fetchReviewSession } from "../lib/api";
 import { migrateReviewAnnotation } from "../lib/review-session-migration";
 import type { DocumentResponse, GroupId, LibraryResponse, ReviewSession, WorkflowStatus } from "../types";
 
+import { readPreference, recentDocumentKey } from "../lib/preferences";
+
 type Setter<T> = Dispatch<SetStateAction<T>>;
 
 function errorMessage(caught: unknown) {
@@ -55,7 +57,9 @@ export function useProjectLibraryLifecycle(input: {
         const allEntries = payload.groups.flatMap((group) => group.entries);
         const currentPath = selectedPathRef.current;
         const retained = allEntries.find((entry) => entry.path === currentPath);
-        const next = retained ?? payload.featured.latestChapter ?? payload.featured.context ?? allEntries[0];
+        const recentPath = readPreference(recentDocumentKey(input.activeProjectId));
+        const recent = allEntries.find((entry) => entry.path === recentPath);
+        const next = retained ?? recent ?? (recentPath ? undefined : payload.featured.latestChapter ?? payload.featured.context ?? allEntries[0]);
         if (next && !currentPath) navigateToPathRef.current(next.path);
         else input.setSelectedPath(next?.path ?? "");
         if (next) input.setOpenGroups((current) => current.includes(next.groupId) ? current : [...current, next.groupId]);

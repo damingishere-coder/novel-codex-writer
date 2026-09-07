@@ -6,18 +6,18 @@ export interface PaneWidths {
 }
 
 export const DEFAULT_PANE_WIDTHS: PaneWidths = {
-  left: 310,
-  right: 480
+  left: 248,
+  right: 360
 };
 
 export const PANE_WIDTH_LIMITS: Record<PaneSide, { min: number; max: number }> = {
   left: { min: 220, max: 420 },
-  right: { min: 400, max: 680 }
+  right: { min: 320, max: 680 }
 };
 
 export const MIN_DOCUMENT_WIDTH = 480;
 export const PANE_RESIZE_HANDLE_WIDTH = 8;
-export const COMPACT_LAYOUT_MAX_WIDTH = 1299;
+export const COMPACT_LAYOUT_MAX_WIDTH = 1199;
 export const COMPACT_VISIBLE_GUTTER = 64;
 
 export function readStoredPaneWidth(value: string | null, side: PaneSide) {

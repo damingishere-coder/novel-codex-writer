@@ -1,4 +1,4 @@
-import { CheckCircle2, CircleAlert, LoaderCircle, RefreshCw, ShieldCheck } from "lucide-react";
+import { CheckCircle2, CircleAlert, LoaderCircle, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { WorkflowStatus } from "../types";
 
@@ -27,7 +27,7 @@ export function WorkflowPanel({ status, loading, busy, onRefresh, onAction }: Wo
   }, [status?.chapter, status?.legacyPatchChoices]);
 
   if (loading) return <div className="surface-state"><LoaderCircle className="animate-spin" />正在诊断创作进度…</div>;
-  if (!status) return <div className="surface-state">尚无工作流状态</div>;
+  if (!status) return <div className="surface-state"><span>尚无工作流状态</span><button className="soft-button" onClick={onRefresh} disabled={busy}><RefreshCw size={15} />重新诊断</button></div>;
   const patch = status.artifacts.find((item) => item.id === "memoryPatch");
 
   return (
@@ -35,7 +35,7 @@ export function WorkflowPanel({ status, loading, busy, onRefresh, onAction }: Wo
       <div className="workflow-heading">
         <div>
           <p className="eyebrow">第{String(status.chapter).padStart(3, "0")}章</p>
-          <h2>创作进度</h2>
+          <h2>本章检查清单</h2>
         </div>
         <button className="icon-button" onClick={onRefresh} disabled={busy} title="重新诊断"><RefreshCw size={16} /></button>
       </div>
@@ -51,11 +51,6 @@ export function WorkflowPanel({ status, loading, busy, onRefresh, onAction }: Wo
             </div>
           </div>
         ))}
-      </div>
-
-      <div className={`workflow-recommendation ${status.state}`}>
-        <ShieldCheck size={18} />
-        <div><strong>{status.nextStep.label}</strong><p>{status.nextStep.reason}</p></div>
       </div>
 
       {status.legacyPatchChoices.length > 1 ? (

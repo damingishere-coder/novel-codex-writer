@@ -30,6 +30,8 @@ function model(patch: Partial<WorkbenchViewModel> = {}): WorkbenchViewModel {
     rightVisible: false,
     rightTab: "review",
     dark: false,
+    themePreference: "system",
+    focusMode: false,
     openGroups: ["chapters"],
     paneWidths: { left: 280, right: 360 },
     workbenchStyle: {},

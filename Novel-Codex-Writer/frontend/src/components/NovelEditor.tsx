@@ -89,19 +89,19 @@ export function NovelEditor({
           enhanceLineNumberAccessibility(update.view);
         }),
         EditorView.theme({
-          "&": { height: "100%", backgroundColor: "transparent" },
+          "&": { height: "100%", backgroundColor: "transparent", color: "var(--workbench-text)" },
           ".cm-scroller": {
             fontFamily: '"Noto Serif SC", "Songti SC", SimSun, serif',
-            fontSize: "16px",
+            fontSize: "18px",
             lineHeight: "1.9",
             overflow: "auto"
           },
-          ".cm-content": { padding: "22px 32px 70px 18px", caretColor: "#2563eb" },
+          ".cm-content": { padding: "32px 28px 80px 18px", caretColor: "var(--workbench-blue)" },
           ".cm-line": { padding: "0 8px" },
           ".cm-gutters": {
             backgroundColor: "transparent",
             borderRight: "1px solid var(--workbench-line)",
-            color: "#9ca3af",
+            color: "var(--workbench-subtle)",
             minWidth: "62px"
           },
           ".cm-lineNumbers .cm-gutterElement": {
@@ -109,12 +109,12 @@ export function NovelEditor({
             padding: "0 15px 0 10px",
             minWidth: "54px"
           },
-          ".cm-lineNumbers .cm-gutterElement:hover": { color: "#2563eb", backgroundColor: "#eff6ff" },
-          ".cm-activeLine": { backgroundColor: "rgba(37, 99, 235, .055)" },
-          ".cm-activeLineGutter": { backgroundColor: "rgba(37, 99, 235, .09)", color: "#2563eb" },
-          ".cm-annotation-line": { backgroundColor: "rgba(37, 99, 235, .075)" },
-          ".cm-annotation-selected": { backgroundColor: "rgba(37, 99, 235, .14)" },
-          ".cm-selectionBackground, ::selection": { backgroundColor: "rgba(37, 99, 235, .18) !important" },
+          ".cm-lineNumbers .cm-gutterElement:hover": { color: "var(--workbench-blue)", backgroundColor: "var(--workbench-blue-soft)" },
+          ".cm-activeLine": { backgroundColor: "var(--editor-line)" },
+          ".cm-activeLineGutter": { backgroundColor: "var(--editor-line)", color: "var(--workbench-blue)" },
+          ".cm-annotation-line": { backgroundColor: "var(--editor-annotation)" },
+          ".cm-annotation-selected": { backgroundColor: "var(--editor-selected)" },
+          ".cm-selectionBackground, ::selection": { backgroundColor: "var(--editor-selection) !important" },
           ".cm-focused": { outline: "none" }
         })
       ]
@@ -172,7 +172,11 @@ export function NovelEditor({
 }
 
 function enhanceLineNumberAccessibility(view: EditorView) {
+  // CodeMirror hides decorative gutters by default. These line numbers are
+  // interactive annotation controls, so they must be in the accessibility tree.
+  view.dom.querySelector(".cm-gutters")?.removeAttribute("aria-hidden");
   for (const element of view.dom.querySelectorAll<HTMLElement>(".cm-lineNumbers .cm-gutterElement")) {
+    if (element.style.visibility === "hidden") continue;
     const lineNumber = element.textContent?.trim();
     if (!lineNumber || !/^\d+$/.test(lineNumber)) continue;
     element.tabIndex = 0;

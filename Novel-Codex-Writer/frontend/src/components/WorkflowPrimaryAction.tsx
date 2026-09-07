@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import { Clipboard, LoaderCircle, Play, ShieldCheck } from "lucide-react";
 import type { WorkflowStatus } from "../types";
 
@@ -18,7 +19,17 @@ function codexPrompt(status: WorkflowStatus) {
 }
 
 export function WorkflowPrimaryAction({ status, busy, onAction, onNotice, onOpenWorkflow }: WorkflowPrimaryActionProps) {
+  const running = useRef(false);
+  const [pending, setPending] = useState(false);
   async function run() {
+    if (running.current || busy) return;
+    running.current = true;
+    setPending(true);
+    try { await execute(); }
+    catch (error) { onNotice(error instanceof Error ? error.message : "执行失败，请重新检查当前状态"); }
+    finally { running.current = false; setPending(false); }
+  }
+  async function execute() {
     const step = status.nextStep;
     if (step.mode === "open_panel") {
       onOpenWorkflow();
@@ -53,9 +64,9 @@ export function WorkflowPrimaryAction({ status, busy, onAction, onNotice, onOpen
 
   const Icon = busy ? LoaderCircle : status.nextStep.mode === "codex_prompt" ? Clipboard : status.nextStep.requiresConfirmation ? ShieldCheck : Play;
   return (
-    <button className="primary-button workflow-primary-action" disabled={busy} onClick={() => void run()}>
+    <button className="primary-button workflow-primary-action" disabled={busy || pending} onClick={() => void run()} title={status.nextStep.label}>
       <Icon size={16} className={busy ? "animate-spin" : undefined} />
-      {busy ? "正在执行…" : status.nextStep.label}
+      {busy || pending ? "正在执行…" : status.nextStep.mode === "codex_prompt" ? "复制任务给 Codex" : status.nextStep.label}
     </button>
   );
 }
