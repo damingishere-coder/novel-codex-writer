@@ -97,9 +97,9 @@ test("按作品恢复最近文档，文档缺失时列出章节，搜索与高�
   await expect(page.locator(".document-title")).toContainText("故事总纲.md");
   await page.getByRole("button", { name: "历史与高级资料" }).click();
   await expect(page.getByRole("button", { name: /章节提交/ })).toBeVisible();
-  await page.getByRole("textbox", { name: "搜索当前小说资料" }).fill("梧桐");
-  await expect(page.locator(".search-results")).toContainText("风起之时");
-  await page.getByRole("textbox", { name: "搜索当前小说资料" }).fill("");
+  await page.getByRole("combobox", { name: "搜索当前小说资料" }).fill("梧桐");
+  await expect(page.getByRole("listbox", { name: "搜索结果" })).toContainText("风起之时");
+  await page.getByRole("combobox", { name: "搜索当前小说资料" }).fill("");
   await page.evaluate((id) => localStorage.setItem(`novel-recent-document:${id}`, "正文/已删除.md"), first.id);
   await page.reload();
   await expect(page.getByText("选择一个章节，继续创作")).toBeVisible();
@@ -188,9 +188,9 @@ test("未保存切换可取消，手机搜索可用，抽屉关闭与放大后�
   await expect(editor).toContainText("必须保留的未保存内容");
   await page.setViewportSize({ width: 390, height: 900 });
   await page.getByRole("button", { name: "搜索资料", exact: true }).click();
-  await expect(page.getByRole("textbox", { name: "搜索当前小说资料" })).toBeFocused();
-  await page.getByRole("textbox", { name: "搜索当前小说资料" }).fill("梧桐");
-  await expect(page.locator(".search-results")).toContainText("风起之时");
+  await expect(page.getByRole("combobox", { name: "搜索当前小说资料" })).toBeFocused();
+  await page.getByRole("combobox", { name: "搜索当前小说资料" }).fill("梧桐");
+  await expect(page.getByRole("listbox", { name: "搜索结果" })).toContainText("风起之时");
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
   await expect(editor).toBeVisible();
