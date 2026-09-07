@@ -112,7 +112,8 @@ test("首次创作状态只显示一个结构化主操作", async ({ page, reque
   await page.goto("/");
   await expect(page.getByLabel("下一章写作驾驶舱")).toBeVisible();
   await expect(page.locator(".workflow-primary-action")).toHaveCount(1);
-  await expect(page.locator(".workflow-primary-action")).toContainText("创建第001章细纲");
+  await expect(page.locator(".workflow-primary-action")).toHaveText("复制任务给 Codex");
+  await expect(page.locator(".workflow-primary-action")).toHaveAttribute("title", "创建第001章细纲");
 });
 
 test("关键章节状态通过真实 HTTP 边界保持唯一下一步", async ({ request }) => {
