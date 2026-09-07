@@ -1,6 +1,6 @@
 import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { fetchDocument, fetchLibrary, fetchReviewSession } from "../lib/api";
-import { migrateReviewAnnotation } from "../lib/review-session-migration";
+import { prepareReviewSessionForDocument } from "../lib/review-session-migration";
 import type { DocumentResponse, GroupId, LibraryResponse, ReviewSession, WorkflowStatus } from "../types";
 
 import { readPreference, recentDocumentKey } from "../lib/preferences";
@@ -109,14 +109,7 @@ export function useDocumentLifecycle(input: {
         if (controller.signal.aborted) return;
         input.setDocument(documentPayload);
         input.setDraftContent(documentPayload.content);
-        input.setSession({
-          ...sessionPayload,
-          annotations: sessionPayload.annotations.map(migrateReviewAnnotation),
-          baseRevision: sessionPayload.baseRevision || documentPayload.revision,
-          chapterReviewRuns: sessionPayload.chapterReviewRuns.map((run) => run.documentRevision === documentPayload.revision
-            ? run
-            : { ...run, status: "stale" as const, verdict: "stale" as const })
-        });
+        input.setSession(prepareReviewSessionForDocument(sessionPayload, documentPayload.revision));
         input.setSelectedAnnotationId(sessionPayload.annotations[0]?.id);
         input.sessionLoadedRef.current = true;
       })

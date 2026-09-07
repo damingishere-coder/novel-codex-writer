@@ -147,7 +147,10 @@ export function normalizeReviewSession(body: ReviewSessionBody, projectId: strin
   if (body.chapterReviewRuns !== undefined && !Array.isArray(body.chapterReviewRuns)) throw new HttpError(400, "整章审阅记录格式不正确。");
   const rawRuns = Array.isArray(body.chapterReviewRuns) ? body.chapterReviewRuns : [];
   if (rawRuns.length > 20) throw new HttpError(touch ? 400 : 409, "整章审阅记录超过 20 条上限。", "REVIEW_SESSION_INVALID");
-  const chapterReviewRuns = rawRuns.map(normalizeChapterReviewRun);
+  // Only persisted pre-v4 sessions may lack the evidence revisions introduced in v4.
+  // Retain their findings but downgrade unsupported confirmation; never migrate client writes.
+  const legacyEvidence = !touch && (body.schemaVersion === undefined || Number(body.schemaVersion) < 4);
+  const chapterReviewRuns = rawRuns.map((run) => normalizeChapterReviewRun(run, { legacyEvidence }));
   if (chapterReviewRuns.some((item) => item === null)) {
     throw new HttpError(touch ? 400 : 409, "整章审阅记录包含无效或损坏数据，已拒绝继续。", "REVIEW_SESSION_INVALID");
   }
@@ -159,7 +162,8 @@ export function normalizeReviewSession(body: ReviewSessionBody, projectId: strin
     status: body.status === "completed" ? "completed" : "active",
     annotations,
     chapterReviewRuns: chapterReviewRuns as ChapterReviewRun[],
-    updatedAt: touch ? new Date().toISOString() : typeof body.updatedAt === "string" ? body.updatedAt : new Date().toISOString()
+    // Missing legacy timestamps need a stable, nonempty value for client validation and revision checks.
+    updatedAt: touch ? new Date().toISOString() : typeof body.updatedAt === "string" && body.updatedAt ? body.updatedAt : "1970-01-01T00:00:00.000Z"
   };
   return { ...normalized, sessionRevision: createRevision(JSON.stringify(normalized)) };
 }
@@ -174,6 +178,7 @@ export async function persistReviewSessionVersioned(input: {
 }) {
   return withProjectWriteLock(input.projectRoot, `.review-sessions/${input.documentPath}`, async () => {
     let currentRevision = "";
+    let storedRuns: ChapterReviewRun[] = [];
     if (existsSync(input.sessionFile)) {
       const stored = normalizeReviewSession(
         parseReviewSessionBody(await readFileInside(input.projectRoot, input.sessionFile, "utf8")),
@@ -182,6 +187,7 @@ export async function persistReviewSessionVersioned(input: {
         false
       );
       currentRevision = stored.sessionRevision;
+      storedRuns = stored.chapterReviewRuns;
     }
     if (input.body.expectedRevision !== currentRevision) {
       throw new HttpError(409, "批注会话已被其他请求修改，请重新载入后再保存。");
@@ -202,7 +208,11 @@ export async function persistReviewSessionVersioned(input: {
         throw new HttpError(409, "整章审阅记录与当前正文 revision 一致，不能伪造为 stale。", "REVIEW_RUN_INVALID_STATE");
       }
       const issued = await loadIssuedReviewRun(input.projectRoot, input.documentPath, run.id);
-      if (!issued || !isDerivedFromIssuedRun(run, issued)) {
+      // Before server-issued proofs existed, sessions already contained historical runs.
+      // They may be retained as stale records, but cannot be edited or revived as new results.
+      const retainedHistory = !issued && !existsSync(issuedReviewRunPath(input.projectRoot, run.id))
+        && isRetainedHistoricalRun(run, storedRuns.find((item) => item.id === run.id));
+      if ((!issued || !isDerivedFromIssuedRun(run, issued)) && !retainedHistory) {
         throw new HttpError(409, "整章审阅记录没有匹配的服务端签发依据，已拒绝保存。", "REVIEW_RUN_UNTRUSTED");
       }
     }
@@ -211,6 +221,20 @@ export async function persistReviewSessionVersioned(input: {
     await atomicWriteJsonInside(input.projectRoot, input.sessionFile, session);
     return session;
   });
+}
+
+function isRetainedHistoricalRun(candidate: ChapterReviewRun, stored: ChapterReviewRun | undefined) {
+  if (!stored || candidate.status !== "stale" || stored.status === "running") return false;
+  const historical = {
+    ...stored,
+    status: "stale",
+    verdict: "stale",
+    findings: stored.findings.map((finding, index) => ({
+      ...finding,
+      status: candidate.findings[index]?.status === "stale" ? "stale" : finding.status
+    }))
+  };
+  return JSON.stringify(candidate) === JSON.stringify(historical);
 }
 
 function issuedReviewRunPath(projectRoot: string, runId: string) {
