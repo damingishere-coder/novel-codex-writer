@@ -50,7 +50,10 @@ import type {
   WorkspaceMode
 } from "./types";
 
-const initialOpenGroups: GroupId[] = ["chapters", "current"];
+import { useTheme } from "./hooks/useTheme";
+import { readPreference, writePreference, removePreference, recentDocumentKey } from "./lib/preferences";
+
+const initialOpenGroups: GroupId[] = ["chapters", "outlines"];
 const validGroupIds = new Set<GroupId>([
   "chapters", "current", "indexes", "archives", "outlines", "guides",
   "reviews", "commits", "memoryPatches", "snapshots"
@@ -59,7 +62,7 @@ const LEFT_PANE_STORAGE_KEY = "novel-left-pane-width";
 const REVIEW_PANE_STORAGE_KEY = "novel-review-pane-width";
 
 function readOpenGroups() {
-  const storedValue = localStorage.getItem("novel-open-groups");
+  const storedValue = readPreference("novel-open-groups");
   if (storedValue === null) return initialOpenGroups;
   try {
     const stored: unknown = JSON.parse(storedValue);
@@ -71,7 +74,7 @@ function readOpenGroups() {
   } catch {
     // Invalid persisted UI state is removed below so the next startup is deterministic.
   }
-  localStorage.removeItem("novel-open-groups");
+  removePreference("novel-open-groups");
   return initialOpenGroups;
 }
 
@@ -86,18 +89,41 @@ export function App() {
   const [session, setSession] = useState<ReviewSession>();
   const [aiStatus, setAiStatus] = useState<AiStatus>();
   const [query, setQuery] = useState("");
-  const [leftCollapsed, setLeftCollapsed] = useState(() => localStorage.getItem("novel-left-collapsed") === "true");
-  const [rightVisible, setRightVisible] = useState(true);
-  const [rightTab, setRightTab] = useState<"review" | "workflow" | "memory" | "recovery">("workflow");
+  const [leftCollapsed, setLeftCollapsed] = useState(() => window.innerWidth < 1200 || readPreference("novel-left-collapsed") === "true");
+  const [rightVisible, setRightVisible] = useState(() => window.innerWidth >= 1024);
+  const [rightTab, setRightTab] = useState<"review" | "workflow" | "memory">("workflow");
   const [documentHistory, setDocumentHistory] = useState<string[]>([]);
   const [documentHistoryIndex, setDocumentHistoryIndex] = useState(-1);
   const [paneWidths, setPaneWidths] = useState<PaneWidths>(() => ({
-    left: readStoredPaneWidth(localStorage.getItem(LEFT_PANE_STORAGE_KEY), "left"),
-    right: readStoredPaneWidth(localStorage.getItem(REVIEW_PANE_STORAGE_KEY), "right")
+    left: readStoredPaneWidth(readPreference(LEFT_PANE_STORAGE_KEY), "left"),
+    right: readStoredPaneWidth(readPreference(REVIEW_PANE_STORAGE_KEY), "right")
   }));
   const [workbenchWidth, setWorkbenchWidth] = useState(0);
   const [openGroups, setOpenGroups] = useState<GroupId[]>(readOpenGroups);
-  const [dark, setDark] = useState(() => localStorage.getItem("novel-theme") === "dark");
+  const { dark, themePreference, setThemePreference } = useTheme();
+  const [focusMode, setFocusMode] = useState(false);
+  const focusSnapshot = useRef({ leftCollapsed: false, rightVisible: true });
+  function toggleFocus() {
+    if (focusMode) {
+      setLeftCollapsed(window.innerWidth < 1200 || focusSnapshot.current.leftCollapsed);
+      setRightVisible(window.innerWidth >= 1024 && focusSnapshot.current.rightVisible);
+    } else {
+      focusSnapshot.current = { leftCollapsed, rightVisible };
+      setLeftCollapsed(true);
+      setRightVisible(false);
+    }
+    setFocusMode((value) => !value);
+  }
+  function openLeftPane() {
+    setFocusMode(false);
+    setLeftCollapsed(false);
+    if (window.innerWidth < 1024) setRightVisible(false);
+  }
+  function openRightPane() {
+    setFocusMode(false);
+    setRightVisible(true);
+    if (window.innerWidth < 1200) setLeftCollapsed(true);
+  }
   const [loading, setLoading] = useState(true);
   const [contentLoading, setContentLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -147,7 +173,7 @@ export function App() {
     results: searchResults,
     status: searchStatus,
     error: searchError
-  } = useLibrarySearch({ activeProjectId, query, setSidebarCollapsed: setLeftCollapsed });
+  } = useLibrarySearch({ activeProjectId, query, setSidebarCollapsed: (value) => { if (value === false) openLeftPane(); else setLeftCollapsed(value); } });
   const {
     status: workflowStatus,
     setStatus: setWorkflowStatus,
@@ -246,18 +272,46 @@ export function App() {
   });
 
   useEffect(() => {
-    globalThis.document.documentElement.classList.toggle("dark", dark);
-    localStorage.setItem("novel-theme", dark ? "dark" : "light");
-  }, [dark]);
+    const compact = window.matchMedia("(max-width: 1199px)");
+    const mobile = window.matchMedia("(max-width: 1023px)");
+    const update = () => {
+      if (compact.matches) setLeftCollapsed(true);
+      if (mobile.matches) setRightVisible(false);
+    };
+    compact.addEventListener("change", update);
+    mobile.addEventListener("change", update);
+    return () => {
+      compact.removeEventListener("change", update);
+      mobile.removeEventListener("change", update);
+    };
+  }, []);
 
   useEffect(() => {
-    localStorage.setItem("novel-left-collapsed", String(leftCollapsed));
-    localStorage.setItem("novel-open-groups", JSON.stringify(openGroups));
+    if (rightVisible && window.innerWidth < 1024) setLeftCollapsed(true);
+  }, [rightVisible]);
+
+  useEffect(() => {
+    if (document && activeProjectId && document.path === selectedPath) {
+      writePreference(recentDocumentKey(activeProjectId), selectedPath);
+    }
+  }, [document, activeProjectId, selectedPath]);
+
+  useEffect(() => {
+    const leave = (event: BeforeUnloadEvent) => {
+      if (dirty) { event.preventDefault(); event.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", leave);
+    return () => window.removeEventListener("beforeunload", leave);
+  }, [dirty]);
+
+  useEffect(() => {
+    writePreference("novel-left-collapsed", String(leftCollapsed));
+    writePreference("novel-open-groups", JSON.stringify(openGroups));
   }, [leftCollapsed, openGroups]);
 
   useEffect(() => {
-    localStorage.setItem(LEFT_PANE_STORAGE_KEY, String(paneWidths.left));
-    localStorage.setItem(REVIEW_PANE_STORAGE_KEY, String(paneWidths.right));
+    writePreference(LEFT_PANE_STORAGE_KEY, String(paneWidths.left));
+    writePreference(REVIEW_PANE_STORAGE_KEY, String(paneWidths.right));
   }, [paneWidths]);
 
   useEffect(() => {
@@ -328,7 +382,9 @@ export function App() {
       const projectPayload = await fetchProjects(controller.signal);
       if (initializeIdRef.current !== requestId || controller.signal.aborted) return;
       setProjects(projectPayload.projects);
-      setActiveProjectId(projectPayload.activeProjectId ?? projectPayload.projects[0]?.id ?? "");
+      const active = projectPayload.projects.find((project) => project.id === projectPayload.activeProjectId);
+      setActiveProjectId(active?.id ?? "");
+      if (!active && projectPayload.projects.length) setProjectManagerOpen(true);
     } catch (caught) {
       if (initializeIdRef.current === requestId && !controller.signal.aborted) setError(getError(caught));
     } finally {
@@ -342,7 +398,18 @@ export function App() {
     projectSwitchControllerRef.current?.abort();
   }, []);
 
+  function invalidatePendingSave() {
+    saveRequestIdRef.current += 1;
+    setSaving(false);
+  }
+
+  function requireSavedDraft(action: string) {
+    if (dirty || saving) throw new Error(`请先保存当前草稿，再${action}`);
+  }
+
   function navigateToPath(path: string, record = true) {
+    invalidatePendingSave();
+    if (activeProjectId && path) writePreference(recentDocumentKey(activeProjectId), path);
     if (record) {
       const current = documentHistoryRef.current;
       const retained = current.items.slice(0, current.index + 1);
@@ -389,13 +456,16 @@ export function App() {
   }
 
   function selectEntry(entry: DocumentEntry) {
+    if (entry.path === selectedPath) return;
     if (dirty && !window.confirm("当前草稿还没有保存。确定切换文档吗？")) return;
     navigateToPath(entry.path);
     setQuery("");
+    if (window.innerWidth < 1200) setLeftCollapsed(true);
     setMode(entry.groupId === "chapters" ? "review" : "preview");
   }
 
   async function switchProject(projectId: string) {
+    if (projectId === activeProjectId) return;
     if (dirty && !window.confirm("当前草稿还没有保存。确定切换小说吗？")) return;
     if (projectSwitchBusyRef.current) return;
     projectSwitchBusyRef.current = true;
@@ -406,6 +476,7 @@ export function App() {
     try {
       await updateProject(projectId, { active: true }, controller.signal);
       if (requestId !== projectSwitchIdRef.current) return;
+      invalidatePendingSave();
       setLibrary(undefined);
       setActiveProjectId(projectId);
       setSelectedPath("");
@@ -430,15 +501,15 @@ export function App() {
     try {
       setSaving(true);
       const saved = await saveDocumentRevision(projectId, document.path, draftContent, document.revision);
-      if (selectionKey === selectionKeyRef.current) {
-        setDocument(saved);
-        setSession((current) => (current ? { ...current, baseRevision: saved.revision } : current));
-      }
+      if (requestId !== saveRequestIdRef.current || selectionKey !== selectionKeyRef.current) return;
+      setDocument(saved);
+      setSession((current) => (current ? { ...current, baseRevision: saved.revision } : current));
       const nextLibrary = await fetchLibrary(projectId);
+      if (requestId !== saveRequestIdRef.current || selectionKey !== selectionKeyRef.current) return;
       if (projectId === activeProjectIdRef.current) setLibrary(nextLibrary);
       showNotice("正文已保存，批注锚点已同步");
     } catch (caught) {
-      if (selectionKey === selectionKeyRef.current) setError(getError(caught));
+      if (requestId === saveRequestIdRef.current && selectionKey === selectionKeyRef.current) setError(getError(caught));
     } finally {
       if (requestId === saveRequestIdRef.current) setSaving(false);
     }
@@ -451,6 +522,7 @@ export function App() {
     setProjects(payload.projects);
     const resolvedActive = nextActive ?? payload.activeProjectId ?? payload.projects[0]?.id ?? "";
     if (resolvedActive !== activeProjectIdRef.current) {
+      invalidatePendingSave();
       setLibrary(undefined);
       setSelectedPath("");
       setDocumentHistory([]);
@@ -467,6 +539,7 @@ export function App() {
     const path = normalizeDocumentPath(pathInput);
     if (!path) return;
     try {
+      requireSavedDraft("新建文档");
       const created = await saveDocument(projectId, path, `# ${path.split("/").at(-1)?.replace(/\.md$/i, "") ?? "未命名文档"}\n\n`);
       if (projectId !== activeProjectIdRef.current) return;
       setNewDocumentOpen(false);
@@ -487,6 +560,7 @@ export function App() {
     const path = selectedPath;
     const selectionKey = selectionKeyRef.current;
     try {
+      requireSavedDraft("移到回收站");
       await deleteDocument(projectId, path);
       if (selectionKey !== selectionKeyRef.current) return;
       setDeleteDocumentOpen(false);
@@ -519,6 +593,7 @@ export function App() {
   }
 
   async function handleCreateProject(name: string) {
+    requireSavedDraft("新建作品");
     const result = await createProject(name);
     await refreshProjects(result.project?.id);
     showNotice("新小说已创建");
@@ -529,6 +604,7 @@ export function App() {
   }
 
   async function handleImportConfirm(token: string, name?: string) {
+    requireSavedDraft("导入作品");
     const result = await confirmProjectImport(token, name);
     await refreshProjects(result.project?.id);
     setRightTab("workflow");
@@ -544,6 +620,7 @@ export function App() {
   }
 
   async function handleDeleteProject(id: string) {
+    if (id === activeProjectId) requireSavedDraft("删除当前作品");
     const result = await deleteProject(id);
     await refreshProjects(result.activeProjectId ?? undefined);
     showNotice("小说已移到回收站，可以恢复");
@@ -574,6 +651,8 @@ export function App() {
     rightVisible,
     rightTab,
     dark,
+    themePreference,
+    focusMode,
     openGroups,
     paneWidths: effectivePaneWidths,
     workbenchStyle,
@@ -615,14 +694,18 @@ export function App() {
     openProjectManager: () => setProjectManagerOpen(true),
     openPreflight: () => setPreflightOpen(true),
     setQuery,
-    openLeftPane: () => setLeftCollapsed(false),
-    toggleLeftPane: () => setLeftCollapsed((value) => !value),
-    openNewDocument: () => setNewDocumentOpen(true),
+    openLeftPane,
+    toggleLeftPane: () => leftCollapsed ? openLeftPane() : setLeftCollapsed(true),
+    openNewDocument: () => {
+      if (dirty || saving) { showNotice("请先保存当前草稿，再新建文档"); return; }
+      setNewDocumentOpen(true);
+    },
     setMode,
-    openRightPane: () => setRightVisible(true),
+    openRightPane,
     closeRightPane: () => setRightVisible(false),
     setRightTab,
-    toggleDark: () => setDark((value) => !value),
+    setThemePreference,
+    toggleFocus,
     toggleGroup: (id) => setOpenGroups((current) => current.includes(id)
       ? current.filter((item) => item !== id)
       : [...current, id]),
@@ -630,9 +713,12 @@ export function App() {
     openAiSettings: () => setAiSettingsOpen(true),
     changePaneWidth: handlePaneWidthChange,
     save: () => void handleSave(),
-    openDeleteDocument: () => setDeleteDocumentOpen(true),
+    openDeleteDocument: () => {
+      if (dirty || saving) { showNotice("请先保存当前草稿，再移到回收站"); return; }
+      setDeleteDocumentOpen(true);
+    },
     changeDraft: handleDraftChange,
-    clickLine: handleLineClick,
+    clickLine: (line, shift) => { handleLineClick(line, shift); openRightPane(); setRightTab("review"); },
     annotationRevealHandled: handleAnnotationRevealHandled,
     selectAnnotation: selectAndRevealAnnotation,
     updateAnnotation,
