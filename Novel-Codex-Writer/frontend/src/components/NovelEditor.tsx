@@ -100,14 +100,14 @@ export function NovelEditor({
           ".cm-line": { padding: "0 8px" },
           ".cm-gutters": {
             backgroundColor: "transparent",
-            borderRight: "1px solid var(--workbench-line)",
+            borderRight: "none",
             color: "var(--workbench-subtle)",
-            minWidth: "62px"
+            minWidth: "48px"
           },
           ".cm-lineNumbers .cm-gutterElement": {
             cursor: "pointer",
-            padding: "0 15px 0 10px",
-            minWidth: "54px"
+            padding: "0 10px 0 6px",
+            minWidth: "42px"
           },
           ".cm-lineNumbers .cm-gutterElement:hover": { color: "var(--workbench-blue)", backgroundColor: "var(--workbench-blue-soft)" },
           ".cm-activeLine": { backgroundColor: "var(--editor-line)" },
