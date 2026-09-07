@@ -614,11 +614,10 @@ button, summary { cursor: pointer; }
 .assistant-toggle { margin-left: auto; height: 32px; padding: 0 10px; font-size: 12px; border-color: transparent; background: var(--workbench-blue-soft); color: var(--workbench-blue); }
 .save-button { height: 32px; font-size: 12px; padding: 0 10px; }
 .document-surface { background: var(--workbench-solid); }
-.document-surface { container-type: inline-size; --document-reading-width: 1080px; --document-page-padding: clamp(16px, 3cqw, 40px); }
+.document-surface { --document-page-padding: 24px; }
 .novel-editor { width: 100%; }
-/* Keep the scrollport at the workspace edge; only the text has a reading-width limit. */
-.novel-editor .cm-scroller { justify-content: center; padding-inline: var(--document-page-padding); }
-.novel-editor .cm-content { min-width: 0; max-width: var(--document-reading-width); }
+/* Use the whole document pane, without a centered page or empty side columns. */
+.novel-editor .cm-content { min-width: 0; }
 .document-footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 38px; padding: 8px 24px; border-top: 1px solid var(--workbench-line); color: var(--workbench-muted); font-size: 10px; }
 .document-footer .word-count { font-size: 12px; }
 .document-empty { padding: 30px; }
@@ -650,7 +649,7 @@ button, summary { cursor: pointer; }
 .modal-body > .recovery-panel { overflow: visible; padding: 0; }
 .annotation-card, .dark .annotation-card { box-shadow: none; }
 .markdown-preview { width: 100%; padding: 32px var(--document-page-padding) 80px; }
-.markdown-preview > .novel-prose { max-width: calc(var(--document-reading-width) - 48px); margin-inline: auto; }
+.markdown-preview > .novel-prose { max-width: none; margin: 0; }
 .novel-prose { --tw-prose-body: var(--workbench-text); --tw-prose-headings: var(--workbench-text); --tw-prose-lead: var(--workbench-muted); --tw-prose-links: var(--workbench-blue); --tw-prose-bold: var(--workbench-text); --tw-prose-counters: var(--workbench-muted); --tw-prose-bullets: var(--workbench-muted); --tw-prose-hr: var(--workbench-line); --tw-prose-quotes: var(--workbench-text); --tw-prose-quote-borders: var(--workbench-line-strong); --tw-prose-captions: var(--workbench-muted); --tw-prose-code: var(--workbench-blue); --tw-prose-pre-code: var(--workbench-text); --tw-prose-pre-bg: var(--workbench-bg); --tw-prose-th-borders: var(--workbench-line-strong); --tw-prose-td-borders: var(--workbench-line); font-family: "Noto Serif SC", "Songti SC", SimSun, serif; font-size: 18px; line-height: 1.9; overflow-wrap: anywhere; }
 .novel-prose :is(h1,h2,h3) { font-family: inherit; }
 .novel-prose h1 { font-size: 1.7em; }
@@ -707,7 +706,6 @@ button, summary { cursor: pointer; }
   .document-footer { padding: 8px 12px; font-size: 9px; }
   .document-footer .word-count small { display: none; }
   .markdown-preview { padding: 24px 20px 60px; }
-  .novel-editor .cm-scroller { padding-inline: 0; }
   .novel-editor .cm-content { padding: 24px 12px 60px 8px !important; }
   .novel-editor .cm-gutters { min-width: 38px !important; }
   .novel-editor .cm-lineNumbers .cm-gutterElement { min-width: 32px !important; padding: 0 8px !important; }
