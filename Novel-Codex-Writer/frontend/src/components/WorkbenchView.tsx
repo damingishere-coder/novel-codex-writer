@@ -31,6 +31,7 @@ import {
 import { ActionMenu } from "./ActionMenu";
 import type { ThemePreference } from "../lib/preferences";
 import { LibrarySidebar } from "./LibrarySidebar";
+import { LibrarySearch } from "./LibrarySearch";
 import { RecoveryPanel } from "./RecoveryPanel";
 import { WorkflowPanel } from "./WorkflowPanel";
 import { WritingCockpit } from "./WritingCockpit";
@@ -126,6 +127,7 @@ export interface WorkbenchViewActions {
   openProjectManager(): void;
   openPreflight(): void;
   setQuery(value: string): void;
+  retrySearch(): void;
   openLeftPane(): void;
   toggleLeftPane(): void;
   openNewDocument(): void;
@@ -228,7 +230,6 @@ export function WorkbenchView({
   }
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k" && window.innerWidth <= 600) setMobileSearch(true);
       if (event.key !== "Escape" || event.defaultPrevented || document.querySelector('[role="dialog"]')) return;
       if (model.focusMode) actions.toggleFocus();
       else if (window.innerWidth < 1200 && !model.leftCollapsed) actions.toggleLeftPane();
@@ -253,15 +254,10 @@ export function WorkbenchView({
           <button onClick={actions.openNewDocument} disabled={!model.activeProjectId}><Plus size={16} />新建文档</button>
           <button onClick={openRecovery}><FileClock size={16} />历史、回收站与导出</button>
         </ActionMenu>
-        <label className="global-search">
-          <Search size={16} />
-          <input ref={searchInputRef} value={model.query} aria-label="搜索当前小说资料"
-            onChange={(event) => { actions.setQuery(event.target.value); if (event.target.value.trim()) actions.openLeftPane(); }}
-            onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); actions.setQuery(""); setMobileSearch(false); event.currentTarget.blur(); } }}
-            placeholder="搜索章节、人物、设定…" />
-          <kbd>Ctrl K</kbd>
-        </label>
-        <button className="icon-button search-toggle" aria-label="搜索资料" onClick={() => { setMobileSearch(!mobileSearch); actions.openLeftPane(); }}><Search size={17} /></button>
+        <LibrarySearch key={model.activeProjectId} query={model.query} results={model.searchResults} status={model.searchStatus} error={model.searchError}
+          enabled={Boolean(model.activeProjectId)} inputRef={searchInputRef} onQuery={actions.setQuery} onSelect={actions.selectEntry}
+          onRetry={actions.retrySearch} onMobileOpen={() => setMobileSearch(true)} onClose={() => setMobileSearch(false)} />
+        <button className="icon-button search-toggle" aria-label="搜索资料" onClick={() => setMobileSearch(!mobileSearch)}><Search size={17} /></button>
         <ActionMenu label="外观" icon={model.themePreference === "system" ? <Monitor size={17} /> : model.dark ? <Moon size={17} /> : <Sun size={17} />}>
           <p className="menu-caption">外观模式</p>
           {(["light", "dark", "system"] as ThemePreference[]).map((value) => <button key={value} aria-pressed={model.themePreference === value} onClick={() => actions.setThemePreference(value)}>
@@ -283,10 +279,6 @@ export function WorkbenchView({
         <LibrarySidebar
           groups={model.library?.groups ?? []}
           selectedPath={model.selectedPath}
-          query={model.query}
-          searchResults={model.searchResults}
-          searchStatus={model.searchStatus}
-          searchError={model.searchError}
           collapsed={model.leftCollapsed}
           openGroups={model.openGroups}
           aiConnected={Boolean(model.aiStatus?.deepseek.available || model.aiStatus?.codex.available)}

@@ -172,8 +172,9 @@ export function App() {
     inputRef: searchInputRef,
     results: searchResults,
     status: searchStatus,
-    error: searchError
-  } = useLibrarySearch({ activeProjectId, query, setSidebarCollapsed: (value) => { if (value === false) openLeftPane(); else setLeftCollapsed(value); } });
+    error: searchError,
+    retry: retrySearch
+  } = useLibrarySearch({ activeProjectId, query });
   const {
     status: workflowStatus,
     setStatus: setWorkflowStatus,
@@ -694,6 +695,7 @@ export function App() {
     openProjectManager: () => setProjectManagerOpen(true),
     openPreflight: () => setPreflightOpen(true),
     setQuery,
+    retrySearch,
     openLeftPane,
     toggleLeftPane: () => leftCollapsed ? openLeftPane() : setLeftCollapsed(true),
     openNewDocument: () => {
