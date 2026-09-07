@@ -795,14 +795,14 @@ export function createReviewRun(input: {
   };
 }
 
-export function normalizeChapterReviewRun(value: unknown): ChapterReviewRun | null {
+export function normalizeChapterReviewRun(value: unknown, options: { legacyEvidence?: boolean } = {}): ChapterReviewRun | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
   if (!stringValue(raw.id, 100) || !stringValue(raw.documentRevision, 128)) return null;
   if (raw.engine !== "deepseek" && raw.engine !== "codex") return null;
   if (raw.status !== "running" && raw.status !== "completed" && raw.status !== "error" && raw.status !== "stale") return null;
   if (!Array.isArray(raw.findings) || raw.findings.length > 100) return null;
-  const normalizedFindings = raw.findings.map(normalizeStoredFinding);
+  const normalizedFindings = raw.findings.map((finding) => normalizeStoredFinding(finding, options.legacyEvidence));
   if (normalizedFindings.some((item) => item === null)) return null;
   const findings = normalizedFindings as ReviewFinding[];
   if (new Set(findings.map((item) => item.id)).size !== findings.length) return null;
@@ -829,7 +829,7 @@ export function normalizeChapterReviewRun(value: unknown): ChapterReviewRun | nu
   };
 }
 
-function normalizeStoredFinding(value: unknown): ReviewFinding | null {
+function normalizeStoredFinding(value: unknown, legacyEvidence = false): ReviewFinding | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
   if (!stringValue(raw.id, 100) || !stringValue(raw.title, 160) || !stringValue(raw.evidence, 1200)) return null;
@@ -854,7 +854,8 @@ function normalizeStoredFinding(value: unknown): ReviewFinding | null {
   if (!Array.isArray(rawSourceRefs) || rawSourceRefs.length > 4) return null;
   const sourceRefs = rawSourceRefs.map(normalizeSourceRef);
   if (sourceRefs.some((item) => item === null)) return null;
-  if (raw.verification === "confirmed" && (sourceRefs.length === 0 || sourceRefs.some((item) => !item?.revision))) return null;
+  const unversionedEvidence = raw.verification === "confirmed" && (sourceRefs.length === 0 || sourceRefs.some((item) => !item?.revision));
+  if (unversionedEvidence && !legacyEvidence) return null;
   return {
     id: stringValue(raw.id, 100),
     source: raw.source,
@@ -868,7 +869,7 @@ function normalizeStoredFinding(value: unknown): ReviewFinding | null {
     evidence: stringValue(raw.evidence, 1200),
     impact: stringValue(raw.impact, 1200) || "可能影响阅读或连续性。",
     fixSuggestion: stringValue(raw.fixSuggestion, 1500) || "请结合原文做最小必要修改。",
-    verification: raw.verification,
+    verification: unversionedEvidence ? "unverified" : raw.verification,
     lookupTerms: lookupTerms.map((item) => stringValue(item, 120)),
     sourceRefs: sourceRefs as ReviewSourceRef[],
     status,

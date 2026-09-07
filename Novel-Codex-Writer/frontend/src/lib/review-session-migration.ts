@@ -1,4 +1,24 @@
-import type { ReviewAnnotation, ReviewConversationMessage } from "../types";
+import type { ReviewAnnotation, ReviewConversationMessage, ReviewSession } from "../types";
+
+export function prepareReviewSessionForDocument(session: ReviewSession, revision: string): ReviewSession {
+  const documentChanged = Boolean(session.baseRevision && session.baseRevision !== revision);
+  return {
+    ...session,
+    baseRevision: revision,
+    annotations: session.annotations.map((annotation) => {
+      const migrated = migrateReviewAnnotation(annotation);
+      return documentChanged ? {
+        ...migrated,
+        status: "stale" as const,
+        suggestion: undefined,
+        error: "正文版本已变化，历史批注已保留，请重新分析后再采用。"
+      } : migrated;
+    }),
+    chapterReviewRuns: session.chapterReviewRuns.map((run) => run.documentRevision === revision
+      ? run
+      : { ...run, status: "stale" as const, verdict: "stale" as const })
+  };
+}
 
 export function migrateReviewAnnotation(annotation: ReviewAnnotation): ReviewAnnotation {
   if (Array.isArray(annotation.messages)) {
