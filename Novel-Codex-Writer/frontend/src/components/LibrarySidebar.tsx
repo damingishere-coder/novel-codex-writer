@@ -15,7 +15,7 @@ import {
   Settings2,
   Tag
 } from "lucide-react";
-import type { DocumentEntry, GroupId, LibraryGroup, SearchResult } from "../types";
+import type { DocumentEntry, GroupId, LibraryGroup } from "../types";
 import { useEffect, useState } from "react";
 import { cn } from "../lib/format";
 
@@ -35,10 +35,6 @@ const groupIcons: Record<GroupId, typeof FileText> = {
 interface LibrarySidebarProps {
   groups: LibraryGroup[];
   selectedPath: string;
-  query: string;
-  searchResults: SearchResult[];
-  searchStatus: "idle" | "loading" | "success" | "error";
-  searchError: string;
   collapsed: boolean;
   openGroups: GroupId[];
   aiConnected: boolean;
@@ -114,28 +110,6 @@ export function LibrarySidebar(props: LibrarySidebarProps) {
       </div>
 
       <div className="sidebar-scroll">
-        {props.query.trim() ? (
-          <section className="search-results" aria-live="polite">
-            <p className="section-caption">
-              {props.searchStatus === "success" ? `搜索结果 · ${props.searchResults.length}` : "搜索当前小说资料"}
-            </p>
-            {props.searchStatus === "loading" ? (
-              <p className="empty-caption">正在搜索…</p>
-            ) : props.searchStatus === "error" ? (
-              <p className="empty-caption search-error">搜索失败：{props.searchError}</p>
-            ) : props.searchResults.length ? (
-              props.searchResults.map((entry) => (
-                <button key={entry.path} className="document-row" onClick={() => props.onSelect(entry)}>
-                  <span>{entry.title}</span>
-                  <small title={entry.snippet}>{entry.groupLabel} · {entry.snippet}</small>
-                </button>
-              ))
-            ) : props.searchStatus === "success" ? (
-              <p className="empty-caption">没有找到匹配内容</p>
-            ) : null}
-          </section>
-        ) : null}
-
         <nav className="accordion-list" aria-label="作品目录">
           <div className="navigation-section-label"><span>创作</span><button className="text-button" onClick={props.onNewDocument} disabled={!props.canCreate} aria-label="新建文档"><Plus size={14} /></button></div>
           {visibleGroups.filter((group) => ["chapters", "outlines"].includes(group.id)).map(renderGroup)}
