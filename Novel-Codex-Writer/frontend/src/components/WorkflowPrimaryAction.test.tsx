@@ -82,6 +82,32 @@ describe("主操作的执行与确认边界", () => {
     await vi.waitFor(() => expect(view.onNotice).toHaveBeenCalledWith("复制失败：权限被拒绝"));
     expect(view.onAction).not.toHaveBeenCalled();
   });
+  it.each(["draft_body", "revise_body"] as const)("%s 任务包含单次最终润色及正文版本保护", async (id) => {
+    const writeText = vi.fn(async (_text: string) => undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const view = mount(status(id, "codex_prompt", "完成正文"));
+    view.click();
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+    const prompt = writeText.mock.calls[0]![0];
+    expect(prompt).toContain("humanizer/SKILL.md");
+    expect(prompt).toContain("执行一次 Humanizer 最终正文润色");
+    expect(prompt).toContain("保留剧情、人物口吻、设定和事实");
+    expect(prompt).toContain("最终正文 SHA-256");
+    expect(prompt).toContain("本次任务不要重复润色");
+    expect(view.onAction).not.toHaveBeenCalled();
+  });
+  it.each(steps.filter(([id, mode]) => mode === "codex_prompt" && id !== "draft_body" && id !== "revise_body"))(
+    "%s 非正文任务不追加 Humanizer",
+    async (id, mode, label) => {
+      const writeText = vi.fn(async () => undefined);
+      vi.stubGlobal("navigator", { clipboard: { writeText } });
+      const view = mount(status(id, mode, label));
+      view.click();
+      await vi.waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+      expect(writeText).toHaveBeenCalledWith(expect.not.stringContaining("Humanizer"));
+      expect(view.onAction).not.toHaveBeenCalled();
+    }
+  );
   it("应用记忆更新必须经过确认，取消时零执行", async () => {
     const confirm = vi.fn(() => false);
     vi.stubGlobal("window", { confirm });

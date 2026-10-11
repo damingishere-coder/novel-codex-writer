@@ -27,6 +27,7 @@ description: 持续创作和维护多部长篇网络小说；用于选择活动�
 - 生成或应用补丁时读取 `references/记忆补丁格式.md` 和 `references/current投影规则.md`。
 - 生成章节提交时读取 `references/章节提交规范.md`。
 - 把控文风时读取 `references/写作风格规则.md`。
+- AI 正文写作及必要修订完成后，读取 `references/Humanizer润色.md` 和同级 `../humanizer/SKILL.md`，对最终草稿执行一次 Humanizer 润色。
 - 审查章节时读取 `references/章节审查规范.md`。
 - 接入已有正文时读取 `references/旧稿接入.md`。
 - 完成章节时读取 `references/章节最终化.md`。
@@ -47,8 +48,10 @@ description: 持续创作和维护多部长篇网络小说；用于选择活动�
 
 1. 按任务书写正文，不把“细纲、伏笔、读者、本章”等工程词写进正文。
 2. 运行 `scripts/check_chapter.py` 检查章节号、字数和确定性问题。
-3. 按 `references/章节审查规范.md` 输出带正文 revision 的审查报告；S1、S2 都会返回失败码，必须先修复再保存最终正文。
-4. 将正文保存为 `正文/第XXX章_标题.md`，审查报告保存到 `审查报告/`。
+3. 按 `references/章节审查规范.md` 审查并修复 S1、S2 问题；先完成剧情、连续性和字数修订。
+4. 按 `references/Humanizer润色.md` 对最终草稿执行一次 Humanizer 润色，保持剧情、人物口吻、设定与事实不变；这一轮内的检查不另算润色轮次。
+5. 润色后重新运行 `scripts/check_chapter.py`，核对 2000—2500 字、细纲和连续性。检查失败只修复具体问题，不自动再跑整轮 Humanizer；未修复前不能最终化。
+6. 作者确认后将最终正文保存为 `正文/第XXX章_标题.md`，基于保存后的正文 revision 重新生成最终审查报告，再生成章节提交与 memory patch。不能沿用润色前的审查通过证明。
 
 ## 写章后
 
