@@ -1,0 +1,632 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "小说创作工作台：写作后的一次 Humanizer 润色",
+    "locale": "zh-CN",
+    "output": ".archify/architecture-novel-humanizer-20261011-154658/novel-humanizer.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/damingishere-coder/novel-codex-writer.git",
+      "provider": "github",
+      "revision": "46e437f5615dede251bd9854a7992f16ad575186",
+      "link_mode": "web"
+    },
+    "views": [
+      {
+        "id": "overview",
+        "label": "先看整体",
+        "focus": [
+          "writer-ui",
+          "local-api",
+          "document-service",
+          "novel-files",
+          "python-tools",
+          "ai-adapter",
+          "deepseek-api",
+          "codex-cli",
+          "browser-preferences",
+          "codex-writer",
+          "humanizer-polish",
+          "final-handoff"
+        ],
+        "note": "箭头表示已在代码中找到的调用或读写关系。点击节点查看用途、源码和上下游。"
+      },
+      {
+        "id": "review-flow",
+        "label": "整章审校",
+        "focus": [
+          "writer-ui",
+          "local-api",
+          "ai-adapter",
+          "deepseek-api",
+          "codex-cli",
+          "novel-files"
+        ],
+        "note": "先保存正文，再运行体检。结果逐条返回网页；跨章问题有条件地二次核查。"
+      },
+      {
+        "id": "save-memory",
+        "label": "保存与记忆",
+        "focus": [
+          "writer-ui",
+          "local-api",
+          "document-service",
+          "python-tools",
+          "novel-files"
+        ],
+        "note": "采用建议只改草稿。保存写入正文；更新记忆是另一项需作者确认、通过版本检查的动作。"
+      },
+      {
+        "id": "write-polish",
+        "label": "写作与最终润色",
+        "focus": [
+          "writer-ui",
+          "codex-writer",
+          "humanizer-polish",
+          "final-handoff",
+          "novel-files"
+        ],
+        "note": "作者将复制任务交给 Codex。正文和必要修订完成后仅润色一次；确认保存后，审查、提交与记忆补丁绑定最终正文。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "deepseek-api",
+      "type": "cloud",
+      "label": "DeepSeek 外部接口",
+      "sublabel": "接收限定上下文，返回审校建议",
+      "tag": "已配置密钥后可选",
+      "pos": [
+        40,
+        80
+      ],
+      "size": [
+        280,
+        100
+      ],
+      "sources": [
+        {
+          "path": "Novel-Codex-Writer/frontend/server/provider-adapter.ts",
+          "line": 104,
+          "end_line": 123,
+          "label": "通过 HTTPS 发送审校请求"
+        }
+      ]
+    },
+    {
+      "id": "ai-adapter",
+      "type": "backend",
+      "label": "AI 引擎适配器",
+      "sublabel": "按选择调用 DeepSeek 或 Codex",
+      "tag": "超时与取消控制",
+      "pos": [
+        440,
+        80
+      ],
+      "size": [
+        280,
+        100
+      ],
+      "sources": [
+        {
+          "path": "Novel-Codex-Writer/frontend/server/provider-adapter.ts",
+          "line": 26,
+          "end_line": 60,
+          "label": "根据所选引擎建立审校适配"
+        },
+        {
+          "path": "Novel-Codex-Writer/frontend/server/provider-adapter.ts",
+          "line": 104,
+          "end_line": 154,
+          "label": "DeepSeek 的请求和响应处理"
+        },
+        {
+          "path": "Novel-Codex-Writer/frontend/server/provider-adapter.ts",
+          "line": 163,
+          "end_line": 182,
+          "label": "检查 Codex 认证与执行文件"
+        }
+      ]
+    },
+    {
+      "id": "codex-cli",
+      "type": "external",
+      "label": "本机 Codex CLI",
+      "sublabel": "启动只读审校进程，复用本机登录",
+      "tag": "执行文件及认证可用后可选",
+      "pos": [
+        840,
+        80
+      ],
+      "size": [
+        280,
+        100
+      ],
+      "sources": [
+        {
+          "path": "Novel-Codex-Writer/frontend/server/provider-adapter.ts",
+          "line": 163,
+          "end_line": 182,
+          "label": "认证检查与只读子进程启动"
+        },
+        {
+          "path": "Novel-Codex-Writer/frontend/server/provider-adapter.ts",
+          "line": 205,
+          "end_line": 237,
+          "label": "输入提示词，接收审校结果"
+        }
+      ]
+    },
+    {
+      "id": "writer-ui",
+      "type": "frontend",
+      "label": "作者的网页工作台",
+      "sublabel": "选择作品、编辑正文、审校与确认保存",
+      "tag": "React · CodeMirror",
+      "pos": [
+        40,
+        420
+      ],
+      "size": [
+        280,
+        100
+      ],
+      "sources": [
+        {
+          "path": "Novel-Codex-Writer/frontend/src/components/WorkflowPrimaryAction.tsx",
+          "line": 14,
+          "end_line": 47,
+          "label": "复制写作任务含一次 Humanizer 润色"
+        },
+        {
+          "path": "Novel-Codex-Writer/frontend/src/hooks/useChapterReviewController.ts",
+          "line": 58,
+          "end_line": 121,
+          "label": "整章体检与采用建议到草稿"
+        },
+        {
+          "path": "Novel-Codex-Writer/frontend/src/App.tsx",
+          "line": 497,
+          "end_line": 516,
+          "label": "点击保存：提交内容与版本"
+        }
+      ]
+    },
+    {
+      "id": "local-api",
+      "type": "backend",
+      "label": "本机 API 与业务协调",
+      "sublabel": "分发请求，组织审校和章节工作流",
+      "tag": "Node.js · Vite 插件",
+      "pos": [
+        440,
+        420
+      ],
+      "size": [
+        280,
+        100
+      ],
+      "sources": [
+        {
+          "path": "Novel-Codex-Writer/frontend/server/novel-library-plugin.ts",
+          "line": 343,
+          "end_line": 456,
+          "label": "API 入口：作品、审校与工作流"
+        },
+        {
+          "path": "Novel-Codex-Writer/frontend/server/novel-library-plugin.ts",
+          "line": 1202,
+          "end_line": 1308,
+          "label": "整章检查、AI 审阅与结果回传"
+        },
+        {
+          "path": "Novel-Codex-Writer/frontend/server/workflow-api.ts",
+          "line": 824,
+          "end_line": 864,
+          "label": "调度脚本；确认后才应用记忆"
+        }
+      ]
+    },
+    {
+      "id": "document-service",
+      "type": "backend",
+      "label": "作品与文档服务",
+      "sublabel": "管理作品和文件，保存前核对版本",
+      "tag": "冲突返回 409 · 保留旧稿",
+      "pos": [
+        840,
+        420
+      ],
+      "size": [
+        280,
+        100
+      ],
+      "sources": [
+        {
+          "path": "Novel-Codex-Writer/frontend/server/project-service.ts",
+          "line": 98,
+          "end_line": 128,
+          "label": "读取与保存作品 JSON 清单"
+        },
+        {
+          "path": "Novel-Codex-Writer/frontend/server/document-service.ts",
+          "line": 45,
+          "end_line": 73,
+          "label": "读取文档与调用版本化保存"
+        },
+        {
+          "path": "Novel-Codex-Writer/frontend/server/file-storage.ts",
+          "line": 387,
+          "end_line": 420,
+          "label": "写入前检查版本并保留历史"
+        }
+      ]
+    },
+    {
+      "id": "browser-preferences",
+      "type": "database",
+      "label": "浏览器偏好",
+      "sublabel": "记住外观与最近文档等界面选择",
+      "tag": "localStorage",
+      "pos": [
+        40,
+        280
+      ],
+      "size": [
+        280,
+        100
+      ],
+      "sources": [
+        {
+          "path": "Novel-Codex-Writer/frontend/src/lib/preferences.ts",
+          "line": 1,
+          "end_line": 22,
+          "label": "浏览器偏好的安全读写"
+        },
+        {
+          "path": "Novel-Codex-Writer/frontend/src/hooks/useTheme.ts",
+          "line": 1,
+          "end_line": 33,
+          "label": "外观偏好的读取与保存"
+        }
+      ]
+    },
+    {
+      "id": "python-tools",
+      "type": "backend",
+      "label": "Python 写作工具",
+      "sublabel": "生成任务书、检查章节、更新记忆",
+      "tag": "当前作品范围 · 受限动作",
+      "pos": [
+        440,
+        780
+      ],
+      "size": [
+        280,
+        100
+      ],
+      "sources": [
+        {
+          "path": "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/build_context.py",
+          "line": 530,
+          "end_line": 622,
+          "label": "选择章节资料并生成任务书"
+        },
+        {
+          "path": "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/check_chapter.py",
+          "line": 424,
+          "end_line": 470,
+          "label": "检查正文并输出报告"
+        },
+        {
+          "path": "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/update_memory.py",
+          "line": 168,
+          "end_line": 199,
+          "label": "更新记忆、应用凭据与索引"
+        }
+      ]
+    },
+    {
+      "id": "novel-files",
+      "type": "database",
+      "label": "本机作品库",
+      "sublabel": "Markdown 事实源，JSON 清单与索引",
+      "tag": "历史保留 · 索引可重建",
+      "pos": [
+        840,
+        780
+      ],
+      "size": [
+        280,
+        100
+      ],
+      "sources": [
+        {
+          "path": "Novel-Codex-Writer/frontend/server/novel-library-plugin.ts",
+          "line": 179,
+          "end_line": 193,
+          "label": "默认作品库及配置路径"
+        },
+        {
+          "path": "Novel-Codex-Writer/frontend/server/review-session-service.ts",
+          "line": 240,
+          "end_line": 250,
+          "label": "审校记录落盘的位置"
+        },
+        {
+          "path": "Novel-Codex-Writer/.agents/skills/webnovel-writer/scripts/update_memory.py",
+          "line": 168,
+          "end_line": 199,
+          "label": "记忆事务、凭据和索引写入"
+        }
+      ]
+    },
+    {
+      "id": "codex-writer",
+      "type": "external",
+      "label": "Codex 写作代理",
+      "sublabel": "按写作 Skill 完成正文与必要修订",
+      "tag": "作者交付任务后执行",
+      "pos": [
+        40,
+        1140
+      ],
+      "size": [
+        280,
+        100
+      ],
+      "sources": [
+        {
+          "path": "Novel-Codex-Writer/.agents/skills/webnovel-writer/SKILL.md",
+          "line": 36,
+          "end_line": 54,
+          "label": "写作与必要修订，然后最终润色"
+        }
+      ]
+    },
+    {
+      "id": "humanizer-polish",
+      "type": "backend",
+      "label": "Humanizer 最终润色层",
+      "sublabel": "保留剧情与口吻，减少模板化表达",
+      "tag": "3.1.0 · 同一代理执行一次",
+      "pos": [
+        440,
+        1140
+      ],
+      "size": [
+        280,
+        100
+      ],
+      "sources": [
+        {
+          "path": "Novel-Codex-Writer/.agents/skills/humanizer/SKILL.md",
+          "line": 32,
+          "end_line": 53,
+          "label": "上游润色规则与 embedded 模式"
+        },
+        {
+          "path": "Novel-Codex-Writer/.agents/skills/webnovel-writer/references/Humanizer润色.md",
+          "line": 1,
+          "end_line": 22,
+          "label": "单次范围、小说事实保护与失败处理"
+        },
+        {
+          "path": "Novel-Codex-Writer/.agents/skills/humanizer/UPSTREAM.json",
+          "line": 1,
+          "end_line": 12,
+          "label": "固定 MIT 上游版本和文件指纹"
+        }
+      ]
+    },
+    {
+      "id": "final-handoff",
+      "type": "security",
+      "label": "Codex 最终检查与交付",
+      "sublabel": "检查字数与连续性，保存最终正文",
+      "tag": "作者确认 · 同版审查与记忆",
+      "pos": [
+        840,
+        1140
+      ],
+      "size": [
+        280,
+        100
+      ],
+      "sources": [
+        {
+          "path": "Novel-Codex-Writer/.agents/skills/webnovel-writer/SKILL.md",
+          "line": 51,
+          "end_line": 63,
+          "label": "重检查、确认保存、同版产物与记忆"
+        },
+        {
+          "path": "Novel-Codex-Writer/.agents/skills/webnovel-writer/references/Humanizer润色.md",
+          "line": 14,
+          "end_line": 22,
+          "label": "保留原稿与润色完成记录"
+        },
+        {
+          "path": "Novel-Codex-Writer/.agents/skills/webnovel-writer/references/章节最终化.md",
+          "line": 1,
+          "end_line": 14,
+          "label": "最终化来源 SHA-256 一致性条件"
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "ui-api",
+      "from": "writer-ui",
+      "to": "local-api",
+      "label": "本机 HTTP",
+      "variant": "emphasis"
+    },
+    {
+      "id": "api-ai",
+      "from": "local-api",
+      "to": "ai-adapter",
+      "label": "审校请求",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ai-deepseek",
+      "from": "ai-adapter",
+      "to": "deepseek-api",
+      "label": "HTTPS",
+      "variant": "dashed"
+    },
+    {
+      "id": "ai-codex",
+      "from": "ai-adapter",
+      "to": "codex-cli",
+      "label": "只读子进程",
+      "variant": "dashed"
+    },
+    {
+      "id": "api-documents",
+      "from": "local-api",
+      "to": "document-service",
+      "label": "读写请求",
+      "variant": "emphasis"
+    },
+    {
+      "id": "documents-files",
+      "from": "document-service",
+      "to": "novel-files",
+      "label": "校验后读写"
+    },
+    {
+      "id": "api-python",
+      "from": "local-api",
+      "to": "python-tools",
+      "label": "受限脚本动作"
+    },
+    {
+      "id": "python-files",
+      "from": "python-tools",
+      "to": "novel-files",
+      "label": "读写记忆"
+    },
+    {
+      "id": "api-files",
+      "from": "local-api",
+      "to": "novel-files",
+      "label": "上下文／记录"
+    },
+    {
+      "id": "ui-preferences",
+      "from": "writer-ui",
+      "to": "browser-preferences",
+      "label": "记住界面偏好"
+    },
+    {
+      "id": "ui-writing-task",
+      "from": "writer-ui",
+      "to": "codex-writer",
+      "label": "复制并交给 Codex",
+      "variant": "dashed"
+    },
+    {
+      "id": "writer-polish",
+      "from": "codex-writer",
+      "to": "humanizer-polish",
+      "label": "完成草稿",
+      "variant": "emphasis"
+    },
+    {
+      "id": "polish-handoff",
+      "from": "humanizer-polish",
+      "to": "final-handoff",
+      "label": "单次润色后",
+      "variant": "emphasis"
+    },
+    {
+      "id": "handoff-files",
+      "from": "final-handoff",
+      "to": "novel-files",
+      "label": "确认后保存",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "项目做什么",
+      "items": [
+        "管理多本小说的大纲、正文、审校与长期记忆。网页负责资料与草稿操作，脚本负责可检查的章节流程。",
+        "页面使用 React、TypeScript、CodeMirror 和 Tailwind；本机 API 使用 Node.js 的 Vite 插件，写作工具使用 Python。"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "主流程①：送审前准备",
+      "items": [
+        "在网页选择当前作品和已保存章节。存在未保存草稿时，先保存再运行整章体检。",
+        "网页携带作品、文档、正文版本和所选引擎，通过 POST /api/ai/review-chapter 请求本机 API。"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "主流程②：检查并回传",
+      "items": [
+        "API 核对磁盘正文，做本地规则检查，并整理细纲、任务书、前面最多五章正文及文风资料。",
+        "适配器调用所选 AI。跨章事实问题有条件地二次核查；分阶段 JSON 结果返回网页，并保存审校运行记录。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "主流程③：作者确认与保存",
+      "items": [
+        "采用有可应用改文的建议时，网页先核对原文，再只替换草稿。原文已变则禁止采用。",
+        "点击保存后，文档服务核对 expectedRevision，保存旧稿到 .history，再写入新正文。版本冲突返回 409。"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "AI 写作的最终语言处理",
+      "items": [
+        "作者把网页复制的任务交给 Codex，按 Skill 完成正文和必要修订，再执行一次 Humanizer。它与网页只读 Codex CLI 审校是不同的任务入口。",
+        "润色层是当前 Codex 读取固定版本的规则执行，不是新增外部服务或检测器。保护人物、时间、数字、因果、口吻和结尾钩子。",
+        "润色后重新检查 2000—2500 字与连续性；作者确认保存后，审查、提交和 memory patch 绑定最终正文 SHA-256，再 dry-run 并确认应用记忆。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "单次范围和原稿保护",
+      "items": [
+        "只对本次 AI 写作或明确 AI 改写的最终草稿执行一次。普通保存、只读审查、章节提交和记忆更新不会再触发；已有章节不批量补跑。",
+        "保留输入稿作对照。检查失败只修复具体问题；规则或润色执行失败时保留原稿并报告未完成，不声称已经润色成功。"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "已确认事实与版本",
+      "items": [
+        "本机功能提交：46e437f5615dede251bd9854a7992f16ad575186；分支 codex/humanizer-final-polish。上游 Humanizer 固定到 225a6f39ac85f76ee48dbad772ea4abe4ed6c9d8。",
+        "节点源码链接固定到功能提交。新润色层由写作规则及网页任务提示词接入；图表达程序结构与 Agent 执行约定。",
+        "入口依次为根目录启动网页.bat、原生启动脚本、frontend/src/main.tsx、App.tsx；本机 API 在 novel-library-plugin.ts 注册。"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "合理推断：图中的分组",
+      "items": [
+        "为方便初学者阅读，将 API 路由、章节审校和工作流协调合并为一个节点；将作品和文档管理合并为一个节点。实际代码仍分散在多个文件。",
+        "作品库节点概括同一数据根目录中的多种文件，不代表独立数据库服务。箭头表示代码调用或读写方向，响应可沿同一次请求返回。"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "尚未确认与分析边界",
+      "items": [
+        "本次接入流程并验证代码、Skill 与图表；未实际创作或润色私人小说，真实文学效果仍待下一次写作检验。",
+        "现有 RunDock 托管服务 Novel-Writer-Web 已核实为 stopped，未启动或重启；图中的配置与模块不表示当前正在运行。",
+        "本次未读取真实正文、密钥、Cookie 或登录文件。Codex 实际模型及账号可用性未重新验证。"
+      ]
+    }
+  ]
+}
