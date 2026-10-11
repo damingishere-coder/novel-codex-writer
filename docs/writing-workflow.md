@@ -145,9 +145,19 @@ python .agents\skills\webnovel-writer\scripts\check_chapter.py --chapter 1
 
 每条问题应包含：证据、影响和修法方向，不应只给空泛评价。
 
-### 10. 作者确认与保存
+### 10. Humanizer 最终正文润色（一次）
+
+AI 写作和必要的剧情、连续性修订完成后，读取 `Novel-Codex-Writer/.agents/skills/webnovel-writer/references/Humanizer润色.md` 和相邻 `humanizer/SKILL.md`，由当前 Codex 对最终草稿执行一次润色。
+
+减少模板化过渡、空泛总结和机械排比，保持剧情、人物口吻、事实、设定及结尾钩子不变。保留输入草稿作对照，润色后重新运行章节检查并核对连续性和 2000—2500 字；检查发现问题只修复具体片段，不再自动执行整轮润色。最终审查报告记录这一轮和输入、输出正文 SHA-256。
+
+这一层只作用于本次 AI 正文写作或明确的 AI 改写；只读审查、手动保存、生成章节提交和记忆更新不触发，已有章节不批量补跑。无法完成时保留原稿并报告。
+
+### 11. 作者确认与保存
 
 AI 可以提出修改，也可以在草稿中应用建议，但正式正文必须由作者确认后保存。
+
+保存润色后的最终正文后，重新生成最终审查报告与机器证明。审查、章节提交、memory patch 和最终化 manifest 必须绑定同一最终正文 SHA-256，不能沿用润色前的通过证明。
 
 推荐保存格式：
 
@@ -156,7 +166,7 @@ AI 可以提出修改，也可以在草稿中应用建议，但正式正文必�
 审查报告/第XXX章_审查报告.md
 ```
 
-### 11. 生成章节提交
+### 12. 生成章节提交
 
 章节提交不是 Git commit，而是一份面向后续创作的结构化记录。
 
@@ -170,7 +180,7 @@ AI 可以提出修改，也可以在草稿中应用建议，但正式正文必�
 - 新增设定和不可违背事实
 - 章末状态与下一章钩子
 
-### 12. 生成 memory patch
+### 13. 生成 memory patch
 
 memory patch 只记录会影响后续创作的变化，不复制整章正文。
 
@@ -188,7 +198,7 @@ python .agents\skills\webnovel-writer\scripts\update_memory.py --patch <补丁�
 
 确认无错误后再正式应用。
 
-### 13. 更新 current、索引与档案
+### 14. 更新 current、索引与档案
 
 应用补丁后：
 
@@ -227,7 +237,7 @@ python .agents\skills\webnovel-writer\scripts\compact_memory.py --range 001-030 
 ```text
 请使用 webnovel-writer Skill，继续写第 12 章。
 先运行写作前诊断，确认章节细纲，生成写作任务书，并全文读取任务书列出的连续前置正文。
-完成正文后运行章节检查，生成审查报告；修复 S1、S2 后保存正式正文，再生成章节提交和 memory patch，先 dry-run 后更新记忆。
+完成正文后运行章节检查和审查，修复 S1、S2；再执行一次 Humanizer 最终正文润色并重新检查字数与连续性。作者确认后保存正式正文，按最终正文 revision 重新生成审查、章节提交和 memory patch，先 dry-run 后更新记忆。
 ```
 
 ### 只审查不改写

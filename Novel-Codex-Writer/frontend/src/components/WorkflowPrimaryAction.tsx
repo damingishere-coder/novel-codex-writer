@@ -15,7 +15,10 @@ function codexPrompt(status: WorkflowStatus) {
     .map((item) => `- ${item.role}: ${item.path} @ ${item.revision?.slice(0, 12) ?? "missing"}`)
     .join("\n");
   const target = status.nextStep.targetPath ? `\n目标文档：${status.nextStep.targetPath}` : "";
-  return `请使用 webnovel-writer Skill 为当前小说执行“${status.nextStep.label}”。\n章节：第${String(status.chapter).padStart(3, "0")}章${target}\n原因：${status.nextStep.reason}\n保持作者确认、revision 和 memory patch 审计语义，不覆盖现有正式正文。\n上下文清单：\n${context}`;
+  const polish = status.nextStep.id === "draft_body" || status.nextStep.id === "revise_body"
+    ? "\n正文及必要修订完成后，读取 Novel-Codex-Writer/.agents/skills/webnovel-writer/references/Humanizer润色.md 和 Novel-Codex-Writer/.agents/skills/humanizer/SKILL.md（在子项目内执行时去掉 Novel-Codex-Writer/ 前缀），执行一次 Humanizer 最终正文润色，保留剧情、人物口吻、设定和事实。润色后重新检查 2000—2500 字及连续性，作者确认后保存最终正文，再按最终正文 SHA-256 生成审查、章节提交和 memory patch；本次任务不要重复润色。"
+    : "";
+  return `请使用 webnovel-writer Skill 为当前小说执行“${status.nextStep.label}”。\n章节：第${String(status.chapter).padStart(3, "0")}章${target}\n原因：${status.nextStep.reason}\n保持作者确认、revision 和 memory patch 审计语义，不覆盖现有正式正文。${polish}\n上下文清单：\n${context}`;
 }
 
 export function WorkflowPrimaryAction({ status, busy, onAction, onNotice, onOpenWorkflow }: WorkflowPrimaryActionProps) {
