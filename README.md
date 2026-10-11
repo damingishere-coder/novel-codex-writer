@@ -77,6 +77,8 @@ flowchart LR
 
 写作 Skill 在本次 AI 正文和必要修订完成后，使用项目内固定版本的 [blader/humanizer](https://github.com/blader/humanizer) 规则执行一次润色，减少模板化表达，保留剧情、人物口吻和设定。由现有 Codex 执行，无需增加服务；润色后重新检查，最终审查、提交和记忆补丁绑定同一正文版本。普通保存和只读审查不会触发润色。
 
+模块与调用关系见 [包含 Humanizer 润色层的架构图说明](docs/architecture/README.md)。
+
 ## 脱敏 Demo
 
 不想先准备自己的小说，可以浏览完全虚构的 [《雾港来信》Demo](examples/demo-novel/)。它展示了：
