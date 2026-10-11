@@ -64,7 +64,9 @@ flowchart LR
     B --> C[Build writing brief]
     C --> D[Load recent chapters and current state]
     D --> E[Draft with Codex]
-    E --> F[Checks and AI review]
+    E --> R[Checks, AI review, and necessary revisions]
+    R --> P[Humanizer final prose polish: one pass]
+    P --> F[Recheck length, continuity, and final review]
     F --> G[Author approval]
     G --> H[Chapter commit and memory patch]
     H --> I[Update current state, index, and archive]
@@ -72,6 +74,8 @@ flowchart LR
 ```
 
 The goal is not unrestricted autonomous generation. The goal is a workflow that can be inspected, corrected, and resumed safely.
+
+The writing skill uses a pinned, MIT-licensed copy of [blader/humanizer](https://github.com/blader/humanizer) after AI drafting and necessary revisions. The existing Codex agent runs one polish pass while preserving plot, character voice, and story facts. Final reviews and memory artifacts use the polished manuscript revision; manual saves and read-only reviews do not trigger polishing.
 
 ## Sanitized demo
 
