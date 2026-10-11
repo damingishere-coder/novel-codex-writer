@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewAnnotation, ReviewFinding, ReviewSession } from "../types";
 import { buildLineSelection, computeChapterReviewVerdict, findActiveAnnotationAtLine, invalidateReviewSessionForRestoredDocument, reconcileAnnotationsAfterReplacement, reconcileFindingsAfterReplacement } from "./review";
+import { prepareReviewSessionForDocument } from "./review-session-migration";
 
 function annotation(id: string, fromLine: number, toLine: number): ReviewAnnotation {
   return {
@@ -39,6 +40,28 @@ function finding(id: string, fromLine: number, toLine: number, severity: ReviewF
 }
 
 describe("行号选择与批注状态", () => {
+  it("打开旧正文版本的批注时保留对话与建议历史，刷新会话版本并阻止旧建议直接采用", () => {
+    const original: ReviewSession = {
+      schemaVersion: 4, projectId: "test", documentPath: "正文.md", baseRevision: "old",
+      status: "active", updatedAt: "2026-07-20T00:00:00.000Z", sessionRevision: "session-revision",
+      chapterReviewRuns: [], annotations: [{ ...annotation("a1", 1, 1), suggestion: {
+        decision: "change", severity: "S3", category: "language", before: "原文", after: "建议改文",
+        rationale: "旧建议", model: "test", usage: null
+      } }]
+    };
+    const current = prepareReviewSessionForDocument(original, "old");
+    expect(current.annotations[0].status).toBe("ready");
+    expect(current.annotations[0].suggestion?.after).toBe("建议改文");
+    const changed = prepareReviewSessionForDocument(original, "new");
+    expect(changed.baseRevision).toBe("new");
+    expect(changed.sessionRevision).toBe("session-revision");
+    expect(changed.annotations[0].status).toBe("stale");
+    expect(changed.annotations[0].suggestion).toBeUndefined();
+    expect(changed.annotations[0].messages?.at(-1)?.suggestion?.after).toBe("建议改文");
+    expect(original.annotations[0].status).toBe("ready");
+    expect(prepareReviewSessionForDocument(changed, "new").annotations[0].messages).toEqual(changed.annotations[0].messages);
+  });
+
   it("普通点击选择单行，Shift 点击选择连续范围", () => {
     expect(buildLineSelection(undefined, 8, false)).toEqual({ fromLine: 8, toLine: 8 });
     expect(buildLineSelection(8, 12, true)).toEqual({ fromLine: 8, toLine: 12 });
