@@ -1,0 +1,32 @@
+{
+  "score": 79,
+  "grade": "B",
+  "tags": ["fallback", "over-fit"],
+  "findings": [
+    {
+      "sev": "MED",
+      "loc": "Novel-Codex-Writer/frontend/server/system-preflight.ts:27",
+      "text": "Python 预检只按 PATH 调用 py/python；实际工作流优先使用 NOVEL_PYTHON_BIN、VIRTUAL_ENV 或固定绝对路径。无效配置或 PATH 差异会让预检显示通过，但实际动作返回 PYTHON_NOT_CONFIGURED。"
+    },
+    {
+      "sev": "MED",
+      "loc": "Novel-Codex-Writer/frontend/server/system-preflight.ts:21",
+      "text": "预检请求同步执行 spawnSync；Python 最多尝试两个命令并叠加 npm 探测，异常环境下最坏可阻塞 Node 事件循环约 15 秒。"
+    },
+    {
+      "sev": "MED",
+      "loc": "Novel-Codex-Writer/scripts/windows/start_native.ps1:74",
+      "text": "Windows 原生启动只检查 vite.cmd 是否存在，不比较 package-lock 或依赖指纹；切换分支或更新 lockfile 后可能继续使用陈旧 node_modules。"
+    },
+    {
+      "sev": "MED",
+      "loc": "Novel-Codex-Writer/scripts/windows/start_native.ps1:87",
+      "text": "服务进程先启动，状态文件随后写入；状态写入失败会留下无状态孤儿进程，启动等待超时也未清理仍存活进程或状态文件。"
+    },
+    {
+      "sev": "LOW",
+      "loc": "Novel-Codex-Writer/frontend/server/system-preflight.ts:80",
+      "text": "listener 检查无条件返回 pass，只把当前请求 localPort 当作监听证明并固定声明 127.0.0.1，没有验证预期端口、绑定地址或进程归属。"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "score": 58,
+  "grade": "D",
+  "tags": ["bloat"],
+  "findings": [
+    {
+      "sev": "HIGH",
+      "loc": "Novel-Codex-Writer/frontend/server/project-import.ts:257",
+      "text": "导入确认在读取 staged token、ZIP 并完成 importProject 副作用后才删除 token；两个并发确认或网络超时后的重试可同时消费同一 token，并由 project-service 依次创建两个不同项目副本。现有测试只覆盖串行二次使用。"
+    },
+    {
+      "sev": "LOW",
+      "loc": "Novel-Codex-Writer/frontend/server/novel-library-plugin.ts:343",
+      "text": "网关主文件仍约 1651 行，集中注册路由并承载项目、文档、版本、回收站、导出、审阅、AI、设置和协议辅助编排；虽已抽出多个服务，核心修改半径仍偏大。"
+    }
+  ]
+}

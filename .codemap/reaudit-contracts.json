@@ -1,0 +1,22 @@
+{
+  "score": 84,
+  "grade": "B",
+  "tags": ["over-fit", "duplication"],
+  "findings": [
+    {
+      "sev": "MED",
+      "loc": "Novel-Codex-Writer/frontend/shared/review-anchor.ts:1",
+      "text": "行号超出正文范围时会静默裁剪到最后一行；同样裁剪逻辑也存在于 frontend/src/lib/format.ts。上层采用建议时可能把失效批注应用到错误行，契约层没有明确的越界拒绝语义。"
+    },
+    {
+      "sev": "LOW",
+      "loc": "Novel-Codex-Writer/frontend/shared/api-contract.ts:38",
+      "text": "WorkflowNextStep 是非判别联合：mode 为 server_action 时 serverAction 仍可选，类型不约束 id、mode 与 serverAction 的合法组合；畸形状态可通过类型检查并在客户端退化为不可执行。"
+    },
+    {
+      "sev": "LOW",
+      "loc": "Novel-Codex-Writer/frontend/src/types.ts:152",
+      "text": "ReviewFinding、ReviewSourceRef、ReviewContextManifestItem、ChapterReviewRun 等协议结构在服务端 chapter-review.ts 再次定义，未统一从 shared 导出，后续字段变更需同步两份。"
+    }
+  ]
+}
